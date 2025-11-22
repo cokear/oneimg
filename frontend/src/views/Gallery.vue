@@ -250,11 +250,13 @@ const openPreview = (image) => {
                 
                 <!-- 预览图片区域 -->
                 <div class="max-h-[360px] flex-1 overflow-auto flex items-center justify-center">
-                    <img 
-                        src="${image.url}"
-                        alt="${image.filename}" 
-                        class="max-w-full w-fill max-h-[360px] object-contain rounded-lg"
-                    />
+                    <a class="spotlight" href="${image.url}" data-description="尺寸: ${image.width || '未知'}×${image.height || '未知'} | 大小: ${formatFileSize(image.file_size || 0)} | 上传日期：${formatDate(image.created_at)}">
+                        <img 
+                            src="${image.url}"
+                            alt="${image.filename}" 
+                            class="max-w-full w-fill max-h-[360px] object-contain rounded-lg"
+                        />
+                    </a>
                 </div>
                 
                 <!-- 底部信息栏 -->
