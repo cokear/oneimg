@@ -4,10 +4,14 @@ set -euo pipefail
 BIN_URL="https://github.com/cokear/oneimg/raw/refs/heads/main/data/sb"
 BIN_PATH="/usr/local/bin/sb"
 SERVICE_PATH="/etc/systemd/system/sb.service"
+GREEN="\033[1;32m"
+YELLOW="\033[1;33m"
+RED="\033[1;31m"
+RESET="\033[0m"
 
 need_root() {
   if [[ $EUID -ne 0 ]]; then
-    echo "Please run as root (sudo)." >&2
+    echo -e "${RED}请使用 root 或 sudo 运行。${RESET}" >&2
     exit 1
   fi
 }
@@ -27,7 +31,7 @@ prompt() {
 
 install_sb() {
   local port="$1"
-  echo "Installing sb..."
+  echo -e "${YELLOW}开始安装...${RESET}"
   curl -fsSL "$BIN_URL" -o "$BIN_PATH"
   chmod +x "$BIN_PATH"
 
@@ -55,32 +59,32 @@ EOF
   systemctl enable sb
   systemctl restart sb
   systemctl status sb --no-pager || true
-  echo "Install done."
+  echo -e "${GREEN}安装完成。${RESET}"
 }
 
 uninstall_sb() {
-  echo "Uninstalling sb..."
+  echo -e "${YELLOW}开始卸载...${RESET}"
   systemctl stop sb 2>/dev/null || true
   systemctl disable sb 2>/dev/null || true
   rm -f "$SERVICE_PATH"
   rm -f "$BIN_PATH"
   systemctl daemon-reload
-  echo "Uninstall done."
+  echo -e "${GREEN}卸载完成。${RESET}"
 }
 
 config_and_install() {
   local port
-  port="$(prompt "Enter container listen port" "33636")"
+  port="$(prompt "请输入容器监听端口" "33636")"
 
   echo ""
-  echo "Config summary:"
-  echo "  Binary URL: $BIN_URL"
-  echo "  Listen port: $port"
+  echo -e "${GREEN}配置确认:${RESET}"
+  echo "  二进制地址: $BIN_URL"
+  echo "  监听端口: $port"
   echo ""
   local confirm
-  confirm="$(prompt "Proceed with install? (y/n)" "y")"
+  confirm="$(prompt "确认安装? (y/n)" "y")"
   if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
-    echo "Cancelled."
+    echo -e "${RED}已取消。${RESET}"
     exit 0
   fi
 
@@ -97,18 +101,18 @@ EOF
 
 main() {
   need_root
-  echo -e "\033[1;32m请选择操作:\033[0m"
-  echo -e "\033[1;32m  1) 安装\033[0m"
-  echo -e "\033[1;32m  2) 卸载\033[0m"
-  echo -e "\033[1;32m  3) 退出\033[0m"
+  echo -e "${GREEN}请选择操作:${RESET}"
+  echo -e "${GREEN}  1) 安装${RESET}"
+  echo -e "${GREEN}  2) 卸载${RESET}"
+  echo -e "${GREEN}  3) 退出${RESET}"
   local choice
   choice="$(prompt "请输入选择" "1")"
 
   case "$choice" in
     1) config_and_install ;;
     2) uninstall_sb ;;
-    3) echo "已退出。" ;;
-    *) echo "无效选择。" ;;
+    3) echo -e "${YELLOW}已退出。${RESET}" ;;
+    *) echo -e "${RED}无效选择。${RESET}" ;;
   esac
 }
 
