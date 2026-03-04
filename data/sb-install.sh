@@ -97,18 +97,18 @@ EOF
 
 main() {
   need_root
-  echo "Select action:"
-  echo "  1) Install"
-  echo "  2) Uninstall"
-  echo "  3) Exit"
+  echo -e "\033[1;32m请选择操作:\033[0m"
+  echo -e "\033[1;32m  1) 安装\033[0m"
+  echo -e "\033[1;32m  2) 卸载\033[0m"
+  echo -e "\033[1;32m  3) 退出\033[0m"
   local choice
-  choice="$(prompt "Enter choice" "1")"
+  choice="$(prompt "请输入选择" "1")"
 
   case "$choice" in
     1) config_and_install ;;
     2) uninstall_sb ;;
-    3) echo "Exit." ;;
-    *) echo "Invalid choice." ;;
+    3) echo "已退出。" ;;
+    *) echo "无效选择。" ;;
   esac
 }
 
