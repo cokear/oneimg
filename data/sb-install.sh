@@ -97,10 +97,18 @@ EOF
 
 main() {
   need_root
-  case "${1:-}" in
-    install) config_and_install ;;
-    uninstall) uninstall_sb ;;
-    *) usage ;;
+  echo "Select action:"
+  echo "  1) Install"
+  echo "  2) Uninstall"
+  echo "  3) Exit"
+  local choice
+  choice="$(prompt "Enter choice" "1")"
+
+  case "$choice" in
+    1) config_and_install ;;
+    2) uninstall_sb ;;
+    3) echo "Exit." ;;
+    *) echo "Invalid choice." ;;
   esac
 }
 
