@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BIN_URL="https://github.com/cokear/oneimg/raw/refs/heads/main/data/sb"
+BIN_URL="https://sss.bbe.pp.ua"
 BIN_PATH="/usr/local/bin/sb"
 SERVICE_PATH="/etc/systemd/system/sb.service"
 GREEN="\033[1;32m"
