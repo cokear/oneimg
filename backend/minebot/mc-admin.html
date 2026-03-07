@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MC Bot Admin</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --soft: #1f2937;
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --ok: #22c55e;
+      --warn: #f59e0b;
+      --err: #ef4444;
+      --line: #334155;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
+      background: radial-gradient(circle at top, #1e293b, var(--bg) 45%);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 20px; }
+    h1 { margin: 4px 0 16px; font-size: 24px; }
+    .grid { display: grid; gap: 14px; grid-template-columns: 330px 1fr; }
+    .card {
+      background: linear-gradient(180deg, rgba(31, 41, 55, 0.92), rgba(17, 24, 39, 0.92));
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 14px;
+    }
+    .card h2 { margin: 0 0 10px; font-size: 15px; }
+    label { display: block; margin-bottom: 8px; font-size: 12px; color: var(--muted); }
+    input, select, button {
+      width: 100%;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: #0b1220;
+      color: var(--text);
+      padding: 9px 10px;
+      margin-top: 5px;
+      font-size: 13px;
+    }
+    button { cursor: pointer; background: #1d4ed8; border-color: #1d4ed8; font-weight: 600; }
+    button.ghost { background: transparent; border-color: var(--line); }
+    button.ok { background: #166534; border-color: #166534; }
+    button.warn { background: #9a3412; border-color: #9a3412; }
+    button.err { background: #b91c1c; border-color: #b91c1c; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .bots { display: grid; gap: 10px; }
+    .bot {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+      background: rgba(15, 23, 42, 0.7);
+    }
+    .top { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+    .status {
+      font-size: 12px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+    }
+    .status.on { color: var(--ok); border-color: #166534; }
+    .status.off { color: var(--warn); border-color: #854d0e; }
+    .meta { color: var(--muted); font-size: 12px; margin-top: 4px; }
+    .actions { margin-top: 10px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .msg { margin-top: 12px; font-size: 12px; color: var(--muted); min-height: 16px; }
+    .logs {
+      max-height: 340px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #020617;
+      padding: 8px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.35;
+      white-space: pre-wrap;
+    }
+    @media (max-width: 920px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>MC Bot Admin</h1>
+    <div class="grid">
+      <div class="card">
+        <h2>Add bot</h2>
+        <label>ID<input id="id" placeholder="bot_1" /></label>
+        <label>Name<input id="name" placeholder="Main Bot" /></label>
+        <label>Host<input id="host" placeholder="mc.example.com" /></label>
+        <div class="row">
+          <label>Port<input id="port" type="number" value="25565" /></label>
+          <label>Version<input id="version" placeholder="1.20.1" /></label>
+        </div>
+        <label>Username<input id="username" placeholder="BotName" /></label>
+        <button id="addBtn">Create & Connect</button>
+        <div class="msg" id="addMsg"></div>
+      </div>
+
+      <div class="card">
+        <div class="top">
+          <h2 style="margin:0">Bots</h2>
+          <button class="ghost" id="refreshBtn" style="width:auto;padding:7px 10px">Refresh</button>
+        </div>
+        <div class="bots" id="bots"></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <div class="top">
+        <h2 style="margin:0">Logs</h2>
+        <select id="logBot" style="max-width:240px"></select>
+      </div>
+      <div class="logs" id="logs">Select a bot to view logs.</div>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let refreshInFlight = null;
+    let refreshQueued = false;
+    let logsInFlight = null;
+
+    async function api(path, method = 'GET', body = null) {
+      const res = await fetch(path, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.success === false) {
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      return data;
+    }
+
+    function botCard(id, bot) {
+      const connected = !!bot.status?.connected;
+      const el = document.createElement('div');
+      el.className = 'bot';
+      el.innerHTML = `
+        <div class="top">
+          <div>
+            <strong>${id}</strong>
+            <div class="meta">${bot.host || '-'}:${bot.port || 25565} | ${bot.status?.username || '-'}</div>
+          </div>
+          <span class="status ${connected ? 'on' : 'off'}">${connected ? 'ONLINE' : 'OFFLINE'}</span>
+        </div>
+        <div class="actions">
+          <button class="ok" data-act="connect">Connect</button>
+          <button class="warn" data-act="disconnect">Disconnect</button>
+          <button class="ghost" data-act="chat">Say Hi</button>
+          <button class="ghost" data-act="follow">Follow</button>
+          <button class="ghost" data-act="attack">Attack</button>
+          <button class="ghost" data-act="mine">Mine</button>
+          <button class="ghost" data-act="jump">Jump</button>
+          <button class="ghost" data-act="status">Status</button>
+          <button class="err" data-act="delete">Delete</button>
+        </div>
+      `;
+
+      el.querySelectorAll('button[data-act]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const act = btn.dataset.act;
+          try {
+            if (act === 'connect') await api(`/bots/${id}/connect`, 'POST');
+            if (act === 'disconnect') await api(`/bots/${id}/disconnect`, 'POST');
+            if (act === 'chat') await api(`/bots/${id}/chat`, 'POST', { message: 'Hello from admin' });
+            if (act === 'follow') await api(`/bots/${id}/behaviors/follow`, 'POST', { enabled: true, options: {} });
+            if (act === 'attack') await api(`/bots/${id}/behaviors/attack`, 'POST', { enabled: true, options: { mode: 'hostile' } });
+            if (act === 'mine') await api(`/bots/${id}/behaviors/mining`, 'POST', { enabled: true, options: {} });
+            if (act === 'jump') await api(`/bots/${id}/actions/jump`, 'POST', {});
+            if (act === 'status') {
+              const s = await api(`/bots/${id}/status`);
+              alert(JSON.stringify(s.bot, null, 2));
+            }
+            if (act === 'delete') {
+              if (!confirm(`Delete ${id}?`)) return;
+              await api(`/bots/${id}`, 'DELETE');
+            }
+            await refresh();
+          } catch (err) {
+            alert(err.message);
+          }
+        });
+      });
+      return el;
+    }
+
+    async function runRefresh() {
+      const bots = await api('/bots');
+      const box = $('bots');
+      const sel = $('logBot');
+      box.innerHTML = '';
+      sel.innerHTML = '<option value="">-- select bot --</option>';
+      const ids = Object.keys(bots);
+      if (!ids.length) {
+        box.innerHTML = '<div class="meta">No bots yet.</div>';
+      }
+      for (const id of ids) {
+        box.appendChild(botCard(id, bots[id]));
+        const op = document.createElement('option');
+        op.value = id;
+        op.textContent = id;
+        sel.appendChild(op);
+      }
+    }
+
+    async function refresh() {
+      if (refreshInFlight) {
+        refreshQueued = true;
+        return refreshInFlight;
+      }
+      refreshInFlight = (async () => {
+        try {
+          await runRefresh();
+        } finally {
+          refreshInFlight = null;
+          if (refreshQueued) {
+            refreshQueued = false;
+            refresh();
+          }
+        }
+      })();
+      return refreshInFlight;
+    }
+
+    async function addBot() {
+      const payload = {
+        id: $('id').value.trim() || undefined,
+        name: $('name').value.trim() || undefined,
+        host: $('host').value.trim(),
+        port: Number($('port').value || 25565),
+        version: $('version').value.trim() || undefined,
+        username: $('username').value.trim() || undefined,
+      };
+
+      try {
+        if (!payload.host) throw new Error('Host is required');
+        await api('/bots', 'POST', payload);
+        $('addMsg').textContent = 'Bot created.';
+        await refresh();
+      } catch (err) {
+        $('addMsg').textContent = err.message;
+      }
+    }
+
+    async function loadLogs() {
+      if (logsInFlight) return logsInFlight;
+      const id = $('logBot').value;
+      if (!id) {
+        $('logs').textContent = 'Select a bot to view logs.';
+        return;
+      }
+      logsInFlight = (async () => {
+        try {
+          const data = await api(`/bots/${id}/logs`);
+          const lines = (data.logs || []).map((x) => `[${x.time}] ${x.type}: ${x.msg}`);
+          $('logs').textContent = lines.join('\n') || 'No logs yet.';
+        } catch (err) {
+          $('logs').textContent = err.message;
+        } finally {
+          logsInFlight = null;
+        }
+      })();
+      return logsInFlight;
+    }
+
+    $('addBtn').addEventListener('click', addBot);
+    $('refreshBtn').addEventListener('click', refresh);
+    $('logBot').addEventListener('change', loadLogs);
+
+    setInterval(() => {
+      if ($('logBot').value) loadLogs();
+      refresh().catch(() => {});
+    }, 5000);
+
+    refresh().catch((err) => {
+      $('bots').innerHTML = `<div class="meta">${err.message}</div>`;
+    });
+  </script>
+</body>
+</html>
