@@ -1,0 +1,24 @@
+{
+  "name": "greathost_restart",
+  "label": "GreatHost 重启",
+  "url": "https://greathost.es/contracts/2f6dfea2-7008-4f19-9101-4d291c1647dc",
+  "steps": [
+    { "action": "wait", "ms": 5000 },
+    {
+      "action": "script",
+      "code": "const readText = () => { const el = document.querySelector('#free-server-container #accumulated-time') || document.querySelector('#accumulated-time'); return el ? (el.textContent || '').trim() : ''; }; const parseHours = (text) => { const normalized = (text || '').toLowerCase().replace(/,/g, ' ').replace(/\\s+/g, ' ').trim(); if (!normalized) return NaN; let total = 0; const dayMatch = normalized.match(/(\\d+(?:\\.\\d+)?)\\s*(day|days|d)/); const hourMatch = normalized.match(/(\\d+(?:\\.\\d+)?)\\s*(hour|hours|hr|hrs|h)/); const minuteMatch = normalized.match(/(\\d+(?:\\.\\d+)?)\\s*(minute|minutes|min|mins|m)/); if (dayMatch) total += Number(dayMatch[1]) * 24; if (hourMatch) total += Number(hourMatch[1]); if (minuteMatch) total += Number(minuteMatch[1]) / 60; if (total > 0) return total; const plainNum = normalized.match(/\\d+(?:\\.\\d+)?/); return plainNum ? Number(plainNum[0]) : NaN; }; const beforeText = readText(); const beforeHours = parseHours(beforeText); if (!beforeText || Number.isNaN(beforeHours)) return `fail:before_unreadable:${beforeText || 'empty'}`; const renewBtn = document.querySelector('#free-server-container #renew-free-server-btn') || document.querySelector('#renew-free-server-btn') || Array.from(document.querySelectorAll('button, [role=\\"button\\"]')).find((el) => /renew\\s*\\+?\\s*\\d+\\s*hours?/i.test((el.textContent || '').trim())); if (!renewBtn) return `fail:button_not_found:before=${beforeText}`; renewBtn.click(); const deadline = Date.now() + 120000; let afterText = beforeText; let afterHours = beforeHours; while (Date.now() < deadline) { await ctx.wait(5000); afterText = readText(); afterHours = parseHours(afterText); if (!Number.isNaN(afterHours) && afterHours > beforeHours) return `ok:${beforeText}->${afterText}`; } return `fail:not_increased:${beforeText}->${afterText}`;",
+      "as": "renewResult"
+    },
+    {
+      "action": "script",
+      "code": "return '5878981847';",
+      "as": "tg_notify_chat_id"
+    },
+    {
+      "action": "assert",
+      "variable": "renewResult",
+      "contains": "ok:",
+      "failMsg": "点击后服务器时间未增加（GreatHost）"
+    }
+  ]
+}
