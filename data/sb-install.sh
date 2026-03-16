@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BIN_URL="https://github.com/cokear/oneimg/raw/refs/heads/main/data/sb"
+BIN_URL="https://bbbb.emem.qzz.io"
 BIN_PATH_ROOT="/usr/local/bin/sb"
 SERVICE_PATH_ROOT="/etc/systemd/system/sb.service"
 BIN_PATH_USER="$HOME/.local/bin/sb"
