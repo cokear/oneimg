@@ -4,8 +4,8 @@ on:
   repository_dispatch:
     types: [Zampto]
   workflow_dispatch:
-  
-    
+  # schedule:
+  #  - cron: '0 0 * * *'
 
 jobs:
   renew:
@@ -25,49 +25,52 @@ jobs:
     - name: Install Python Dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install seleniumbase Pillow
+        pip install seleniumbase Pillow requests
         seleniumbase install chromedriver
-        
+
     - name: Install System Dependencies
       run: |
         sudo apt-get update -qq
-        sudo apt-get install -y xdotool scrot xvfb google-chrome-stable
-        
+        sudo apt-get install -y xdotool scrot xvfb chromium-browser git
+
     - name: Setup Proxy Tunnel (sing-box)
       env:
         PROXY_STR: ${{ secrets.ZAMPTO_PROXY }}
       run: |
-        # 下载 sing-box
         wget -q https://github.com/SagerNet/sing-box/releases/download/v1.8.10/sing-box-1.8.10-linux-amd64.tar.gz
         tar -xzf sing-box-1.8.10-linux-amd64.tar.gz
         chmod +x sing-box-1.8.10-linux-amd64/sing-box
-        
-        # 使用 Python 脚本生成配置
         python generate_singbox_config.py
-        
-        # 验证配置格式
         if ! ./sing-box-1.8.10-linux-amd64/sing-box check -c config.json; then
-          echo "❌ Invalid sing-box config generated!"
+          echo "❌ Invalid sing-box config!"
           exit 1
         fi
-        
-        # 启动 sing-box
         nohup ./sing-box-1.8.10-linux-amd64/sing-box run -c config.json > singbox.log 2>&1 &
         sleep 8
-        
-        # 测试连接
-        echo "Testing tunnel..."
-        curl --connect-timeout 10 -x socks5h://127.0.0.1:1080 https://api.ipify.org || true
+        curl --connect-timeout 10 -x socks5h://127.0.0.1:8080 https://api.ipify.org || true
 
-    - name: Run Task (Strongest Mode)
+    - name: Setup FlareSolverr
+      run: |
+        git clone --depth=1 https://github.com/FlareSolverr/FlareSolverr.git /tmp/flaresolverr
+        cd /tmp/flaresolverr
+        pip install -q -r requirements.txt
+        nohup python src/flaresolverr.py > flaresolverr.log 2>&1 &
+        sleep 15
+        curl -s http://127.0.0.1:8191/ || (sleep 10 && curl -s http://127.0.0.1:8191/)
+
+    - name: Run Task (CF-Bypass Mode)
       env:
         PYTHONIOENCODING: utf-8
         ZAMPTO_TARGET_URL: ${{ secrets.ZAMPTO_TARGET_URL }}
         ZAMPTO_USERNAME: ${{ secrets.ZAMPTO_USERNAME }}
         ZAMPTO_PASSWORD: ${{ secrets.ZAMPTO_PASSWORD }}
-        ZAMPTO_PROXY: socks5://127.0.0.1:1080
+        ZAMPTO_PROXY: socks5://127.0.0.1:8080
+        FS_URL: http://127.0.0.1:8191/v1
       run: |
-        xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" python zampto_renewal.py
+        export DISPLAY=:99
+        Xvfb :99 -screen 0 1920x1080x24 &
+        sleep 2
+        python zampto_renewal.py
 
     - name: Upload Debug Screenshots
       if: always()
@@ -78,6 +81,7 @@ jobs:
         path: |
           artifacts/**/*.png
           singbox.log
+          flaresolverr.log
 
     - name: Send Telegram Notification
       if: always()
@@ -92,7 +96,6 @@ jobs:
         else
           MESSAGE="❌ Zampto 续期失败"
         fi
-
         curl -s -X POST "https://api.telegram.org/bot${{ secrets.TG_BOT_TOKEN }}/sendMessage" \
           -d chat_id="${{ secrets.TG_CHAT_ID }}" \
           -d text="$MESSAGE"
