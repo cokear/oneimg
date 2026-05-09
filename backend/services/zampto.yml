@@ -1,0 +1,102 @@
+name: Zampto-Renew
+
+on:
+  repository_dispatch:
+    types: [Zampto]
+  workflow_dispatch:
+  
+    
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install Python Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install seleniumbase Pillow
+        seleniumbase install chromedriver
+        
+    - name: Install System Dependencies
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y xdotool scrot xvfb google-chrome-stable
+        
+    - name: Setup Proxy Tunnel (sing-box)
+      env:
+        PROXY_STR: ${{ secrets.ZAMPTO_PROXY }}
+      run: |
+        # 下载 sing-box
+        wget -q https://github.com/SagerNet/sing-box/releases/download/v1.8.10/sing-box-1.8.10-linux-amd64.tar.gz
+        tar -xzf sing-box-1.8.10-linux-amd64.tar.gz
+        chmod +x sing-box-1.8.10-linux-amd64/sing-box
+        
+        # 使用 Python 脚本生成配置
+        python generate_singbox_config.py
+        
+        # 验证配置格式
+        if ! ./sing-box-1.8.10-linux-amd64/sing-box check -c config.json; then
+          echo "❌ Invalid sing-box config generated!"
+          exit 1
+        fi
+        
+        # 启动 sing-box
+        nohup ./sing-box-1.8.10-linux-amd64/sing-box run -c config.json > singbox.log 2>&1 &
+        sleep 8
+        
+        # 测试连接
+        echo "Testing tunnel..."
+        curl --connect-timeout 10 -x socks5h://127.0.0.1:1080 https://api.ipify.org || true
+
+    - name: Run Task (Strongest Mode)
+      env:
+        PYTHONIOENCODING: utf-8
+        ZAMPTO_TARGET_URL: ${{ secrets.ZAMPTO_TARGET_URL }}
+        ZAMPTO_USERNAME: ${{ secrets.ZAMPTO_USERNAME }}
+        ZAMPTO_PASSWORD: ${{ secrets.ZAMPTO_PASSWORD }}
+        ZAMPTO_PROXY: socks5://127.0.0.1:1080
+      run: |
+        xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" python zampto_renewal.py
+
+    - name: Upload Debug Screenshots
+      if: always()
+      continue-on-error: true
+      uses: actions/upload-artifact@v4
+      with:
+        name: zampto-screenshots
+        path: |
+          artifacts/**/*.png
+          singbox.log
+
+    - name: Send Telegram Notification
+      if: always()
+      run: |
+        STATUS="${{ job.status }}"
+        if [ "$STATUS" = "success" ]; then
+          if [ -f renewal_result.txt ]; then
+              MESSAGE=$(cat renewal_result.txt)
+          else
+              MESSAGE="✅ Zampto 续期成功"
+          fi
+        else
+          MESSAGE="❌ Zampto 续期失败"
+        fi
+
+        curl -s -X POST "https://api.telegram.org/bot${{ secrets.TG_BOT_TOKEN }}/sendMessage" \
+          -d chat_id="${{ secrets.TG_CHAT_ID }}" \
+          -d text="$MESSAGE"
+        curl -s -X POST "https://api.telegram.org/bot${{ secrets.TG_BOT_TOKEN }}/sendPhoto" \
+          -F chat_id="${{ secrets.TG_CHAT_ID }}" \
+          -F photo=@artifacts/final_page.png \
+          -F caption="Zampto Final State" || true
