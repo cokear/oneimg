@@ -1,0 +1,72 @@
+// ==UserScript==
+// @name         Start AFK 智能验证点击版
+// @namespace    http://tampermonkey.net/
+// @version      1.6
+// @description  自动检测 CF 令牌，成功后再点；自动跳过错误弹窗并刷新
+// @author       Assistant
+// @match        https://dash.lememdev.qzz.io/afk
+// @grant        none
+// @run-at       document-start
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    console.log("脚本已启动，正在监控验证状态...");
+
+    // --- 1. 拦截并处理弹窗 (防止 Invalid captcha 弹窗卡住脚本) ---
+    const originalAlert = window.alert;
+    window.alert = function(message) {
+        console.log("拦截到弹窗消息: " + message);
+        if (message.includes("captcha") || message.includes("refresh")) {
+            console.log("验证码无效，3秒后自动刷新重试...");
+            setTimeout(() => location.reload(), 3000);
+        } else {
+            // 如果是其他弹窗，可以选择保留或忽略
+            originalAlert(message);
+        }
+    };
+
+    // --- 2. 页面加载后的逻辑 ---
+    window.addEventListener('load', function() {
+
+        // A. 4分钟保底刷新
+        setTimeout(() => {
+            console.log("4分钟到，定时刷新...");
+            location.reload();
+        }, 4 * 60 * 1000);
+
+        // B. 核心点击逻辑：等待 CF 令牌出现
+        const checkTurnstile = setInterval(() => {
+            // Cloudflare 成功后，会在这个隐藏的文本域里填入一串很长的 token
+            const cfToken = document.querySelector('[name="cf-turnstile-response"]');
+            const btn = document.getElementById('startAfkBtn');
+
+            if (cfToken && cfToken.value.length > 10) {
+                console.log("检测到 CF 验证令牌已生成！准备点击...");
+                clearInterval(checkTurnstile); // 停止检测
+
+                // 稍微延迟 1 秒确保令牌被网页脚本读取
+                setTimeout(() => {
+                    if (btn) {
+                        btn.click();
+                        console.log("点击成功！");
+                    }
+                }, 1000);
+            } else {
+                console.log("等待 Cloudflare 验证通过...");
+            }
+        }, 2000);
+
+        // C. 超时检测：如果 20 秒还没成功点击，说明可能卡住了，自动刷新
+        setTimeout(() => {
+            const statusText = document.body.innerText;
+            if (!statusText.includes("Status: Connected")) {
+                console.log("20秒未连接成功，自动刷新重试...");
+                // location.reload();
+            }
+        }, 20000);
+
+    });
+
+})();
