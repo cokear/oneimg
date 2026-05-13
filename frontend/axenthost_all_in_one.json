@@ -58,6 +58,7 @@
     "    }",
     "    return {",
     "      tg_notify_chat_id: notifyId,",
+    "      __webtask_next_run_at: computeNextRunAt(),",
     "      剩余金币: state.totalCredits || '--',",
     "      金币领取剩余: `${state.claimsLeft}/${CLAIM_LIMIT}`,",
     "      金币冷却: state.nextClaimTime > now ? formatDelay(state.nextClaimTime - now) : '已到时间',",
