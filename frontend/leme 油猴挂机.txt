@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Start AFK 智能验证点击版
 // @namespace    http://tampermonkey.net/
-// @version      2.1
-// @description  Worker心跳 + 状态面板 + CF令牌检测 + 120秒结算安全刷新 + 本地积分累计
+// @version      2.2
+// @description  Worker心跳 + 状态面板 + CF令牌检测 + 45分钟安全兜底刷新 + 本地积分累计
 // @author       Assistant
 // @match        https://dash.lememdev.qzz.io/afk
 // @grant        none
@@ -14,10 +14,11 @@
 
     const CFG = {
         CHECK_INTERVAL: 1000,
-        REFRESH_AFTER: 4 * 60 * 1000,
+        REFRESH_AFTER: 45 * 60 * 1000,
         REWARD_PERIOD: 120 * 1000,
         REWARD_COINS: 10,
         SAFE_REFRESH_DELAY: 3000,
+        DISCONNECTED_GRACE: 30 * 1000,
         CLICK_DEBOUNCE: 2500,
         ALERT_RELOAD_DELAY: 3000,
         CONNECT_TIMEOUT: 20000,
@@ -38,6 +39,7 @@
     let estimatedCoins = 0;
     let refreshPending = false;
     let refreshScheduled = false;
+    let disconnectedSince = 0;
 
     const workerCode = `
         let iv = null;
@@ -254,7 +256,7 @@
 
         panel.innerHTML = [
             '<div id="afk-header" style="background:rgba(255,255,255,0.05);padding:10px 14px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,0.07);cursor:move;">',
-            '  <span style="font-size:13px;font-weight:bold;color:#7eb3ff;">AFK 智能挂机 v2.1</span>',
+            '  <span style="font-size:13px;font-weight:bold;color:#7eb3ff;">AFK 智能挂机 v2.2</span>',
             '  <span id="afk-uptime" style="font-size:11px;background:rgba(255,255,255,0.08);padding:2px 8px;border-radius:10px;color:#aaa;">0分0秒</span>',
             '</div>',
             '<div style="padding:12px 14px;display:flex;flex-direction:column;gap:8px;">',
@@ -359,6 +361,7 @@
         }
 
         if (isConnected()) {
+            disconnectedSince = 0;
             resetReloadCountIfConnected();
             const rewarded = updateRewardEstimate();
 
@@ -373,6 +376,22 @@
             }
 
             updatePanel(rewarded ? 'reward' : 'connected', '状态已连接，脚本持续守护中', 'CONNECTED');
+            return;
+        }
+
+        if (connectedAt) {
+            if (!disconnectedSince) {
+                disconnectedSince = Date.now();
+                updatePanel('timeoutRetry', '连接状态消失，等待恢复...', 'DISCONNECT');
+                return;
+            }
+
+            if (Date.now() - disconnectedSince >= CFG.DISCONNECTED_GRACE) {
+                reloadWithLimit('连接状态消失超过30秒', 'timeoutRetry');
+                return;
+            }
+
+            updatePanel('timeoutRetry', `连接状态消失，宽限中：${formatCountdown(CFG.DISCONNECTED_GRACE - (Date.now() - disconnectedSince))}`, 'DISCONNECT');
             return;
         }
 
@@ -435,7 +454,7 @@
         updatePanel('loading', '页面加载完成，开始监控', '--:--');
     });
 
-    console.log('[AFK] v2.1 脚本已启动：Worker心跳 + 安全窗口刷新 + 本地积分累计');
+    console.log('[AFK] v2.2 脚本已启动：Worker心跳 + 45分钟安全兜底 + 掉线恢复 + 本地积分累计');
     worker.postMessage('start');
     loop();
 })();
