@@ -1,72 +1,348 @@
 // ==UserScript==
 // @name         Start AFK 智能验证点击版
 // @namespace    http://tampermonkey.net/
-// @version      1.6
-// @description  自动检测 CF 令牌，成功后再点；自动跳过错误弹窗并刷新
+// @version      2.0
+// @description  Worker心跳 + 状态面板 + CF令牌检测 + 自动恢复
 // @author       Assistant
 // @match        https://dash.lememdev.qzz.io/afk
 // @grant        none
 // @run-at       document-start
 // ==/UserScript==
 
-(function() {
+(function () {
     'use strict';
 
-    console.log("脚本已启动，正在监控验证状态...");
+    const CFG = {
+        CHECK_INTERVAL: 1000,
+        FORCE_REFRESH: 4 * 60 * 1000,
+        CLICK_DEBOUNCE: 2500,
+        ALERT_RELOAD_DELAY: 3000,
+        CONNECT_TIMEOUT: 20000,
+        TOKEN_MIN_LEN: 10,
+        MAX_RELOADS: 6,
+        RELOAD_KEY: 'afk_auto_reload_count'
+    };
 
-    // --- 1. 拦截并处理弹窗 (防止 Invalid captcha 弹窗卡住脚本) ---
-    const originalAlert = window.alert;
-    window.alert = function(message) {
-        console.log("拦截到弹窗消息: " + message);
-        if (message.includes("captcha") || message.includes("refresh")) {
-            console.log("验证码无效，3秒后自动刷新重试...");
-            setTimeout(() => location.reload(), 3000);
+    const startTime = Date.now();
+    let tickCount = 0;
+    let lastClickAt = 0;
+    let clickedAfterToken = false;
+    let panelReady = false;
+
+    const workerCode = `
+        let iv = null;
+        self.onmessage = function (e) {
+            if (e.data === 'start') {
+                if (!iv) {
+                    iv = setInterval(() => self.postMessage('tick'), ${CFG.CHECK_INTERVAL});
+                }
+            } else if (e.data === 'stop') {
+                clearInterval(iv);
+                iv = null;
+            }
+        };
+    `;
+
+    const worker = new Worker(URL.createObjectURL(new Blob([workerCode], { type: 'application/javascript' })));
+
+    const STATUS = {
+        loading: { color: '#888', title: '页面加载中' },
+        waitingToken: { color: '#ffaa00', title: '等待 Cloudflare 验证' },
+        tokenReady: { color: '#00ccff', title: '令牌已就绪，等待点击' },
+        clicking: { color: '#00ff88', title: '正在点击 Start AFK' },
+        connected: { color: '#00cc66', title: '已连接挂机中' },
+        alertRetry: { color: '#ff8844', title: '验证码失败，准备重试' },
+        timeoutRetry: { color: '#ff4444', title: '超时未成功，准备重试' },
+        forceRefresh: { color: '#ff66ff', title: '到达刷新时间，准备重载' },
+        stopped: { color: '#777', title: '已停止自动重载' }
+    };
+
+    function formatCountdown(ms) {
+        if (ms <= 0) return '00:00';
+        const seconds = Math.floor(ms / 1000);
+        const m = String(Math.floor(seconds / 60)).padStart(2, '0');
+        const s = String(seconds % 60).padStart(2, '0');
+        return `${m}:${s}`;
+    }
+
+    function formatUptime(ms) {
+        if (ms <= 0) return '0分0秒';
+        const s = Math.floor(ms / 1000);
+        return `${Math.floor(s / 60)}分${s % 60}秒`;
+    }
+
+    function isConnected() {
+        return !!(document.body && document.body.innerText.includes('Status: Connected'));
+    }
+
+    function getReloadCount() {
+        return Number(sessionStorage.getItem(CFG.RELOAD_KEY) || '0');
+    }
+
+    function setReloadCount(v) {
+        sessionStorage.setItem(CFG.RELOAD_KEY, String(v));
+    }
+
+    function resetReloadCountIfConnected() {
+        if (isConnected()) {
+            sessionStorage.removeItem(CFG.RELOAD_KEY);
+        }
+    }
+
+    function updatePanel(stateKey, detail, timerText) {
+        if (!panelReady) return;
+
+        const state = STATUS[stateKey] || STATUS.loading;
+        const row = document.getElementById('afk-status-row');
+        const dot = document.getElementById('afk-dot');
+        const title = document.getElementById('afk-status-title');
+        const detailEl = document.getElementById('afk-status-detail');
+        const timer = document.getElementById('afk-timer');
+        const refresh = document.getElementById('afk-refresh');
+        const uptime = document.getElementById('afk-uptime');
+        const tick = document.getElementById('afk-tick');
+        const bg = document.getElementById('afk-bg-status');
+
+        if (!row || !dot || !title || !detailEl || !timer || !refresh || !uptime || !tick || !bg) {
+            return;
+        }
+
+        row.style.borderLeftColor = state.color;
+        dot.style.background = state.color;
+        dot.style.boxShadow = `0 0 6px ${state.color}`;
+        title.textContent = state.title;
+        detailEl.textContent = detail;
+
+        timer.textContent = timerText || '--:--';
+        tick.textContent = `${tickCount} 次`;
+
+        const elapsed = Date.now() - startTime;
+        const remaining = CFG.FORCE_REFRESH - elapsed;
+        uptime.textContent = formatUptime(elapsed);
+        refresh.textContent = formatCountdown(remaining);
+
+        if (document.hidden) {
+            bg.textContent = '后台运行';
+            bg.style.color = '#8888ff';
+            bg.style.background = 'rgba(120,120,255,0.15)';
         } else {
-            // 如果是其他弹窗，可以选择保留或忽略
-            originalAlert(message);
+            bg.textContent = '前台运行';
+            bg.style.color = '#00cc66';
+            bg.style.background = 'rgba(0,200,100,0.15)';
+        }
+    }
+
+    function reloadWithLimit(reason, stateKey) {
+        const count = getReloadCount();
+        if (count >= CFG.MAX_RELOADS) {
+            console.log(`[AFK] 已连续刷新 ${count} 次，停止自动刷新。原因: ${reason}`);
+            updatePanel('stopped', `达到最大重试 ${CFG.MAX_RELOADS} 次：${reason}`, '--:--');
+            worker.postMessage('stop');
+            return;
+        }
+
+        setReloadCount(count + 1);
+        console.log(`[AFK] ${reason}，${CFG.ALERT_RELOAD_DELAY / 1000} 秒后自动刷新，第 ${count + 1}/${CFG.MAX_RELOADS} 次...`);
+        updatePanel(stateKey || 'timeoutRetry', `${reason}，即将刷新重试 (${count + 1}/${CFG.MAX_RELOADS})`, '--:--');
+
+        worker.postMessage('stop');
+        setTimeout(() => location.reload(), CFG.ALERT_RELOAD_DELAY);
+    }
+
+    function getStartButton() {
+        return document.getElementById('startAfkBtn') || document.getElementById('start-afk-btn');
+    }
+
+    function tryClick(btn, label) {
+        if (!btn || btn.disabled) return false;
+        const now = Date.now();
+        if (now - lastClickAt < CFG.CLICK_DEBOUNCE) return false;
+
+        lastClickAt = now;
+        console.log(`[AFK] 点击按钮: ${label}`);
+
+        const eventOptions = { bubbles: true, cancelable: true, view: window };
+        btn.dispatchEvent(new MouseEvent('mousedown', eventOptions));
+        btn.dispatchEvent(new MouseEvent('mouseup', eventOptions));
+        btn.click();
+
+        return true;
+    }
+
+    function ensurePanel() {
+        if (document.getElementById('afk-panel')) {
+            panelReady = true;
+            return;
+        }
+
+        const panel = document.createElement('div');
+        panel.id = 'afk-panel';
+        panel.style.cssText = [
+            'position:fixed', 'bottom:20px', 'right:20px', 'z-index:2147483647',
+            'width:290px',
+            'background:linear-gradient(145deg,#0f0f1a,#1a1a2e)',
+            'border:1px solid rgba(100,100,255,0.3)',
+            'border-radius:14px',
+            'box-shadow:0 8px 32px rgba(0,0,0,0.6),0 0 0 1px rgba(255,255,255,0.05)',
+            "font-family:'Consolas','Monaco',monospace",
+            'font-size:12px', 'color:#e0e0e0', 'overflow:hidden', 'user-select:none'
+        ].join(';');
+
+        panel.innerHTML = [
+            '<div id="afk-header" style="background:rgba(255,255,255,0.05);padding:10px 14px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,0.07);cursor:move;">',
+            '  <span style="font-size:13px;font-weight:bold;color:#7eb3ff;">AFK 智能挂机 v2</span>',
+            '  <span id="afk-uptime" style="font-size:11px;background:rgba(255,255,255,0.08);padding:2px 8px;border-radius:10px;color:#aaa;">0分0秒</span>',
+            '</div>',
+            '<div style="padding:12px 14px;display:flex;flex-direction:column;gap:8px;">',
+            '  <div id="afk-status-row" style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:rgba(255,255,255,0.04);border-radius:8px;border-left:3px solid #888;">',
+            '    <span id="afk-dot" style="width:8px;height:8px;border-radius:50%;background:#888;flex-shrink:0;box-shadow:0 0 6px #888;"></span>',
+            '    <div style="flex:1;min-width:0;">',
+            '      <div id="afk-status-title" style="font-weight:bold;font-size:12px;color:#fff;">初始化中...</div>',
+            '      <div id="afk-status-detail" style="font-size:11px;color:#999;margin-top:1px;">准备脚本环境...</div>',
+            '    </div>',
+            '  </div>',
+            '  <div style="display:flex;gap:8px;">',
+            '    <div style="flex:1;padding:7px 10px;background:rgba(255,255,255,0.04);border-radius:8px;text-align:center;">',
+            '      <div style="color:#aaa;font-size:10px;margin-bottom:2px;">连接状态</div>',
+            '      <div id="afk-timer" style="color:#7eb3ff;font-size:14px;font-weight:bold;">--:--</div>',
+            '    </div>',
+            '    <div style="flex:1;padding:7px 10px;background:rgba(255,255,255,0.04);border-radius:8px;text-align:center;">',
+            '      <div style="color:#aaa;font-size:10px;margin-bottom:2px;">刷新倒计时</div>',
+            '      <div id="afk-refresh" style="color:#ffd700;font-size:14px;font-weight:bold;">--:--</div>',
+            '    </div>',
+            '  </div>',
+            '  <div style="padding:7px 10px;background:rgba(255,255,255,0.04);border-radius:8px;display:flex;justify-content:space-between;align-items:center;">',
+            '    <span style="color:#aaa;font-size:11px;">标签页状态</span>',
+            '    <span id="afk-bg-status" style="font-size:11px;padding:2px 8px;border-radius:10px;background:rgba(0,200,100,0.15);color:#00cc66;">前台运行</span>',
+            '  </div>',
+            '  <div style="padding:7px 10px;background:rgba(255,255,255,0.04);border-radius:8px;display:flex;justify-content:space-between;">',
+            '    <span style="color:#aaa;font-size:11px;">Worker 心跳</span>',
+            '    <span id="afk-tick" style="color:#7eb3ff;font-size:11px;">0 次</span>',
+            '  </div>',
+            '</div>'
+        ].join('');
+
+        document.body.appendChild(panel);
+        panelReady = true;
+
+        let dragging = false;
+        let offsetX = 0;
+        let offsetY = 0;
+
+        const header = document.getElementById('afk-header');
+        if (header) {
+            header.addEventListener('mousedown', (e) => {
+                dragging = true;
+                const rect = panel.getBoundingClientRect();
+                offsetX = e.clientX - rect.left;
+                offsetY = e.clientY - rect.top;
+            });
+        }
+
+        document.addEventListener('mousemove', (e) => {
+            if (!dragging) return;
+            panel.style.right = 'auto';
+            panel.style.bottom = 'auto';
+            panel.style.left = `${e.clientX - offsetX}px`;
+            panel.style.top = `${e.clientY - offsetY}px`;
+        });
+
+        document.addEventListener('mouseup', () => {
+            dragging = false;
+        });
+    }
+
+    const originalAlert = window.alert;
+    window.alert = function (message) {
+        const text = String(message || '');
+        const lower = text.toLowerCase();
+        console.log('[AFK] 拦截到弹窗:', text);
+
+        if (lower.includes('captcha') || lower.includes('refresh')) {
+            reloadWithLimit('验证码无效或页面提示刷新', 'alertRetry');
+            return;
+        }
+
+        originalAlert(message);
+    };
+
+    function loop() {
+        tickCount++;
+
+        if (!document.body) {
+            return;
+        }
+
+        if (!panelReady) {
+            ensurePanel();
+            updatePanel('loading', '页面已加载，准备检测元素...', '--:--');
+        }
+
+        const elapsed = Date.now() - startTime;
+        if (elapsed >= CFG.FORCE_REFRESH) {
+            updatePanel('forceRefresh', '达到定时刷新窗口，准备重载', '--:--');
+            worker.postMessage('stop');
+            setTimeout(() => location.reload(), 800);
+            return;
+        }
+
+        if (isConnected()) {
+            resetReloadCountIfConnected();
+            updatePanel('connected', '状态已连接，脚本持续守护中', 'CONNECTED');
+            return;
+        }
+
+        const cfToken = document.querySelector('[name="cf-turnstile-response"]');
+        const tokenReady = !!(cfToken && cfToken.value && cfToken.value.length > CFG.TOKEN_MIN_LEN);
+        const startBtn = getStartButton();
+
+        if (tokenReady) {
+            if (!startBtn) {
+                updatePanel('tokenReady', '令牌存在，等待 Start 按钮出现', 'TOKEN OK');
+                return;
+            }
+
+            if (startBtn.disabled) {
+                updatePanel('tokenReady', '令牌存在，按钮暂不可点击', 'TOKEN OK');
+                return;
+            }
+
+            updatePanel('clicking', '令牌有效，正在触发点击', 'TOKEN OK');
+            if (tryClick(startBtn, 'Start AFK')) {
+                clickedAfterToken = true;
+            }
+            return;
+        }
+
+        const afterTimeout = elapsed >= CFG.CONNECT_TIMEOUT;
+        if (afterTimeout && !clickedAfterToken) {
+            reloadWithLimit('20秒未检测到有效令牌或连接成功', 'timeoutRetry');
+            return;
+        }
+
+        updatePanel('waitingToken', '等待 Cloudflare 令牌生成...', 'WAITING');
+    }
+
+    worker.onmessage = () => {
+        try {
+            loop();
+        } catch (e) {
+            console.warn('[AFK] 主循环异常:', e);
         }
     };
 
-    // --- 2. 页面加载后的逻辑 ---
-    window.addEventListener('load', function() {
-
-        // A. 4分钟保底刷新
-        setTimeout(() => {
-            console.log("4分钟到，定时刷新...");
-            location.reload();
-        }, 4 * 60 * 1000);
-
-        // B. 核心点击逻辑：等待 CF 令牌出现
-        const checkTurnstile = setInterval(() => {
-            // Cloudflare 成功后，会在这个隐藏的文本域里填入一串很长的 token
-            const cfToken = document.querySelector('[name="cf-turnstile-response"]');
-            const btn = document.getElementById('startAfkBtn');
-
-            if (cfToken && cfToken.value.length > 10) {
-                console.log("检测到 CF 验证令牌已生成！准备点击...");
-                clearInterval(checkTurnstile); // 停止检测
-
-                // 稍微延迟 1 秒确保令牌被网页脚本读取
-                setTimeout(() => {
-                    if (btn) {
-                        btn.click();
-                        console.log("点击成功！");
-                    }
-                }, 1000);
-            } else {
-                console.log("等待 Cloudflare 验证通过...");
-            }
-        }, 2000);
-
-        // C. 超时检测：如果 20 秒还没成功点击，说明可能卡住了，自动刷新
-        setTimeout(() => {
-            const statusText = document.body.innerText;
-            if (!statusText.includes("Status: Connected")) {
-                console.log("20秒未连接成功，自动刷新重试...");
-                // location.reload();
-            }
-        }, 20000);
-
+    document.addEventListener('visibilitychange', () => {
+        if (panelReady) {
+            updatePanel('loading', '标签页状态变化，继续守护', '--:--');
+        }
     });
 
+    window.addEventListener('load', () => {
+        ensurePanel();
+        updatePanel('loading', '页面加载完成，开始监控', '--:--');
+    });
+
+    console.log('[AFK] v2 脚本已启动：Worker心跳 + 状态面板 + 自动恢复');
+    worker.postMessage('start');
+    loop();
 })();
