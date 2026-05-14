@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Start AFK 智能验证点击版
 // @namespace    http://tampermonkey.net/
-// @version      2.0
-// @description  Worker心跳 + 状态面板 + CF令牌检测 + 自动恢复
+// @version      2.1
+// @description  Worker心跳 + 状态面板 + CF令牌检测 + 120秒结算安全刷新 + 本地积分累计
 // @author       Assistant
 // @match        https://dash.lememdev.qzz.io/afk
 // @grant        none
@@ -14,10 +14,14 @@
 
     const CFG = {
         CHECK_INTERVAL: 1000,
-        FORCE_REFRESH: 4 * 60 * 1000,
+        REFRESH_AFTER: 4 * 60 * 1000,
+        REWARD_PERIOD: 120 * 1000,
+        REWARD_COINS: 10,
+        SAFE_REFRESH_DELAY: 3000,
         CLICK_DEBOUNCE: 2500,
         ALERT_RELOAD_DELAY: 3000,
         CONNECT_TIMEOUT: 20000,
+        POST_CLICK_TIMEOUT: 30000,
         TOKEN_MIN_LEN: 10,
         MAX_RELOADS: 6,
         RELOAD_KEY: 'afk_auto_reload_count'
@@ -27,7 +31,13 @@
     let tickCount = 0;
     let lastClickAt = 0;
     let clickedAfterToken = false;
+    let firstClickAt = 0;
     let panelReady = false;
+    let connectedAt = 0;
+    let countedRewardCycles = 0;
+    let estimatedCoins = 0;
+    let refreshPending = false;
+    let refreshScheduled = false;
 
     const workerCode = `
         let iv = null;
@@ -51,9 +61,11 @@
         tokenReady: { color: '#00ccff', title: '令牌已就绪，等待点击' },
         clicking: { color: '#00ff88', title: '正在点击 Start AFK' },
         connected: { color: '#00cc66', title: '已连接挂机中' },
+        reward: { color: '#7ee787', title: '本地结算已累计' },
+        refreshPending: { color: '#ffd700', title: '等待安全刷新窗口' },
+        safeRefresh: { color: '#ff66ff', title: '安全窗口刷新中' },
         alertRetry: { color: '#ff8844', title: '验证码失败，准备重试' },
         timeoutRetry: { color: '#ff4444', title: '超时未成功，准备重试' },
-        forceRefresh: { color: '#ff66ff', title: '到达刷新时间，准备重载' },
         stopped: { color: '#777', title: '已停止自动重载' }
     };
 
@@ -71,8 +83,12 @@
         return `${Math.floor(s / 60)}分${s % 60}秒`;
     }
 
+    function getBodyText() {
+        return document.body ? document.body.innerText : '';
+    }
+
     function isConnected() {
-        return !!(document.body && document.body.innerText.includes('Status: Connected'));
+        return /Status:\s*Connected\.?/i.test(getBodyText());
     }
 
     function getReloadCount() {
@@ -89,6 +105,35 @@
         }
     }
 
+    function getNextRewardMs() {
+        if (!connectedAt) return CFG.REWARD_PERIOD;
+        const connectedElapsed = Date.now() - connectedAt;
+        const passedInCycle = connectedElapsed % CFG.REWARD_PERIOD;
+        return CFG.REWARD_PERIOD - passedInCycle;
+    }
+
+    function updateRewardEstimate() {
+        if (!isConnected()) return false;
+
+        if (!connectedAt) {
+            connectedAt = Date.now();
+            countedRewardCycles = 0;
+            estimatedCoins = 0;
+            return false;
+        }
+
+        const cycles = Math.floor((Date.now() - connectedAt) / CFG.REWARD_PERIOD);
+        if (cycles > countedRewardCycles) {
+            const gainedCycles = cycles - countedRewardCycles;
+            countedRewardCycles = cycles;
+            estimatedCoins += gainedCycles * CFG.REWARD_COINS;
+            console.log(`[AFK] 本地累计 +${gainedCycles * CFG.REWARD_COINS}，当前预计 ${estimatedCoins}`);
+            return true;
+        }
+
+        return false;
+    }
+
     function updatePanel(stateKey, detail, timerText) {
         if (!panelReady) return;
 
@@ -102,8 +147,10 @@
         const uptime = document.getElementById('afk-uptime');
         const tick = document.getElementById('afk-tick');
         const bg = document.getElementById('afk-bg-status');
+        const coins = document.getElementById('afk-coins');
+        const reward = document.getElementById('afk-reward');
 
-        if (!row || !dot || !title || !detailEl || !timer || !refresh || !uptime || !tick || !bg) {
+        if (!row || !dot || !title || !detailEl || !timer || !refresh || !uptime || !tick || !bg || !coins || !reward) {
             return;
         }
 
@@ -115,11 +162,18 @@
 
         timer.textContent = timerText || '--:--';
         tick.textContent = `${tickCount} 次`;
+        uptime.textContent = formatUptime(Date.now() - startTime);
+        coins.textContent = `${estimatedCoins} coin`;
+        reward.textContent = connectedAt ? formatCountdown(getNextRewardMs()) : '--:--';
 
-        const elapsed = Date.now() - startTime;
-        const remaining = CFG.FORCE_REFRESH - elapsed;
-        uptime.textContent = formatUptime(elapsed);
-        refresh.textContent = formatCountdown(remaining);
+        if (refreshPending) {
+            refresh.textContent = '待安全窗口';
+            refresh.style.color = '#ffd700';
+        } else {
+            const remaining = CFG.REFRESH_AFTER - (Date.now() - startTime);
+            refresh.textContent = formatCountdown(remaining);
+            refresh.style.color = '#ffd700';
+        }
 
         if (document.hidden) {
             bg.textContent = '后台运行';
@@ -147,6 +201,16 @@
 
         worker.postMessage('stop');
         setTimeout(() => location.reload(), CFG.ALERT_RELOAD_DELAY);
+    }
+
+    function scheduleSafeRefresh(reason) {
+        if (refreshScheduled) return;
+
+        refreshScheduled = true;
+        console.log(`[AFK] ${reason}，${CFG.SAFE_REFRESH_DELAY / 1000} 秒后刷新`);
+        updatePanel('safeRefresh', `${reason}，${CFG.SAFE_REFRESH_DELAY / 1000}秒后刷新`, 'SAFE');
+        worker.postMessage('stop');
+        setTimeout(() => location.reload(), CFG.SAFE_REFRESH_DELAY);
     }
 
     function getStartButton() {
@@ -179,7 +243,7 @@
         panel.id = 'afk-panel';
         panel.style.cssText = [
             'position:fixed', 'bottom:20px', 'right:20px', 'z-index:2147483647',
-            'width:290px',
+            'width:300px',
             'background:linear-gradient(145deg,#0f0f1a,#1a1a2e)',
             'border:1px solid rgba(100,100,255,0.3)',
             'border-radius:14px',
@@ -190,7 +254,7 @@
 
         panel.innerHTML = [
             '<div id="afk-header" style="background:rgba(255,255,255,0.05);padding:10px 14px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,0.07);cursor:move;">',
-            '  <span style="font-size:13px;font-weight:bold;color:#7eb3ff;">AFK 智能挂机 v2</span>',
+            '  <span style="font-size:13px;font-weight:bold;color:#7eb3ff;">AFK 智能挂机 v2.1</span>',
             '  <span id="afk-uptime" style="font-size:11px;background:rgba(255,255,255,0.08);padding:2px 8px;border-radius:10px;color:#aaa;">0分0秒</span>',
             '</div>',
             '<div style="padding:12px 14px;display:flex;flex-direction:column;gap:8px;">',
@@ -209,6 +273,16 @@
             '    <div style="flex:1;padding:7px 10px;background:rgba(255,255,255,0.04);border-radius:8px;text-align:center;">',
             '      <div style="color:#aaa;font-size:10px;margin-bottom:2px;">刷新倒计时</div>',
             '      <div id="afk-refresh" style="color:#ffd700;font-size:14px;font-weight:bold;">--:--</div>',
+            '    </div>',
+            '  </div>',
+            '  <div style="display:flex;gap:8px;">',
+            '    <div style="flex:1;padding:7px 10px;background:rgba(255,255,255,0.04);border-radius:8px;text-align:center;">',
+            '      <div style="color:#aaa;font-size:10px;margin-bottom:2px;">预计积分</div>',
+            '      <div id="afk-coins" style="color:#7ee787;font-size:14px;font-weight:bold;">0 coin</div>',
+            '    </div>',
+            '    <div style="flex:1;padding:7px 10px;background:rgba(255,255,255,0.04);border-radius:8px;text-align:center;">',
+            '      <div style="color:#aaa;font-size:10px;margin-bottom:2px;">下次结算</div>',
+            '      <div id="afk-reward" style="color:#ffaa00;font-size:14px;font-weight:bold;">--:--</div>',
             '    </div>',
             '  </div>',
             '  <div style="padding:7px 10px;background:rgba(255,255,255,0.04);border-radius:8px;display:flex;justify-content:space-between;align-items:center;">',
@@ -279,18 +353,32 @@
         }
 
         const elapsed = Date.now() - startTime;
-        if (elapsed >= CFG.FORCE_REFRESH) {
-            updatePanel('forceRefresh', '达到定时刷新窗口，准备重载', '--:--');
-            worker.postMessage('stop');
-            setTimeout(() => location.reload(), 800);
-            return;
+        if (elapsed >= CFG.REFRESH_AFTER && !refreshPending) {
+            refreshPending = true;
+            console.log('[AFK] 已到刷新时间，等待下一次 120 秒结算安全窗口');
         }
 
         if (isConnected()) {
             resetReloadCountIfConnected();
-            updatePanel('connected', '状态已连接，脚本持续守护中', 'CONNECTED');
+            const rewarded = updateRewardEstimate();
+
+            if (refreshPending && rewarded) {
+                scheduleSafeRefresh('检测到结算后安全窗口');
+                return;
+            }
+
+            if (refreshPending) {
+                updatePanel('refreshPending', `已到刷新时间，等待下次结算：${formatCountdown(getNextRewardMs())}`, 'CONNECTED');
+                return;
+            }
+
+            updatePanel(rewarded ? 'reward' : 'connected', '状态已连接，脚本持续守护中', 'CONNECTED');
             return;
         }
+
+        connectedAt = 0;
+        countedRewardCycles = 0;
+        estimatedCoins = 0;
 
         const cfToken = document.querySelector('[name="cf-turnstile-response"]');
         const tokenReady = !!(cfToken && cfToken.value && cfToken.value.length > CFG.TOKEN_MIN_LEN);
@@ -310,13 +398,18 @@
             updatePanel('clicking', '令牌有效，正在触发点击', 'TOKEN OK');
             if (tryClick(startBtn, 'Start AFK')) {
                 clickedAfterToken = true;
+                firstClickAt = Date.now();
             }
             return;
         }
 
-        const afterTimeout = elapsed >= CFG.CONNECT_TIMEOUT;
-        if (afterTimeout && !clickedAfterToken) {
+        if (elapsed >= CFG.CONNECT_TIMEOUT && !clickedAfterToken) {
             reloadWithLimit('20秒未检测到有效令牌或连接成功', 'timeoutRetry');
+            return;
+        }
+
+        if (clickedAfterToken && firstClickAt && Date.now() - firstClickAt >= CFG.POST_CLICK_TIMEOUT) {
+            reloadWithLimit('点击后30秒仍未连接成功', 'timeoutRetry');
             return;
         }
 
@@ -342,7 +435,7 @@
         updatePanel('loading', '页面加载完成，开始监控', '--:--');
     });
 
-    console.log('[AFK] v2 脚本已启动：Worker心跳 + 状态面板 + 自动恢复');
+    console.log('[AFK] v2.1 脚本已启动：Worker心跳 + 安全窗口刷新 + 本地积分累计');
     worker.postMessage('start');
     loop();
 })();
