@@ -41,6 +41,27 @@ validate_port() {
   [[ "$port" =~ ^[0-9]+$ ]] && (( port >= 1 && port <= 65535 ))
 }
 
+detect_arch() {
+  case "$(uname -m)" in
+    x86_64|amd64) echo "amd64" ;;
+    aarch64|arm64) echo "arm64" ;;
+    *)
+      echo -e "${RED}不支持的架构: $(uname -m)${RESET}" >&2
+      exit 1
+      ;;
+  esac
+}
+
+get_bin_url() {
+  local arch
+  arch="$(detect_arch)"
+  if [[ "$BIN_URL" == *\?* ]]; then
+    echo "${BIN_URL}&arch=${arch}"
+  else
+    echo "${BIN_URL}?arch=${arch}"
+  fi
+}
+
 prompt() {
   local label="$1"
   local default="$2"
@@ -55,8 +76,11 @@ prompt() {
 }
 
 download_root_binary() {
+  local url
+  url="$(get_bin_url)"
   ensure_root_paths
-  curl -fsSL "$BIN_URL" -o "$BIN_PATH_ROOT"
+  echo -e "${YELLOW}下载: $url${RESET}"
+  curl -fsSL "$url" -o "$BIN_PATH_ROOT"
   chmod +x "$BIN_PATH_ROOT"
 }
 
@@ -149,8 +173,11 @@ install_sb_root() {
 install_sb_user_systemd() {
   local port="$1"
   echo -e "${YELLOW}开始安装 (用户服务)...${RESET}"
+  local url
+  url="$(get_bin_url)"
   ensure_user_paths
-  curl -fsSL "$BIN_URL" -o "$BIN_PATH_USER"
+  echo -e "${YELLOW}下载: $url${RESET}"
+  curl -fsSL "$url" -o "$BIN_PATH_USER"
   chmod +x "$BIN_PATH_USER"
 
   cat > "$SERVICE_PATH_USER" <<EOF
@@ -184,8 +211,11 @@ EOF
 install_sb_user_nohup() {
   local port="$1"
   echo -e "${YELLOW}开始安装 (nohup 后台)...${RESET}"
+  local url
+  url="$(get_bin_url)"
   ensure_user_paths
-  curl -fsSL "$BIN_URL" -o "$BIN_PATH_USER"
+  echo -e "${YELLOW}下载: $url${RESET}"
+  curl -fsSL "$url" -o "$BIN_PATH_USER"
   chmod +x "$BIN_PATH_USER"
   pkill -f "$BIN_PATH_USER" 2>/dev/null || true
   nohup "$BIN_PATH_USER" --public-port "$port" >"$LOG_PATH_USER" 2>&1 &
