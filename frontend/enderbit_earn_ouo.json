@@ -1,0 +1,69 @@
+{
+  "name": "enderbit_earn_ouo",
+  "label": "Enderbit Earn Ouo 自动流程",
+  "url": "https://dash.enderbit.com/earn?from=ouo",
+  "timeout": 240000,
+  "steps": [
+    {
+      "action": "script",
+      "timeout": 70000,
+      "keepOpen": true,
+      "code": "const wait = (ms) => ctx.wait(ms); const log = async (message) => { if (ctx.log) await ctx.log('[Enderbit Ouo] ' + message); }; await log('第1步：开始查找 Enderbit 入口按钮，当前地址：' + location.href); const visible = (el) => { if (!el) return false; const style = getComputedStyle(el); const rect = el.getBoundingClientRect(); return style.display !== 'none' && style.visibility !== 'hidden' && style.pointerEvents !== 'none' && rect.width > 0 && rect.height > 0; }; const textOf = (el) => ((el && (el.innerText || el.textContent)) || '').replace(/\\s+/g, ' ').trim(); const clickElement = (el) => { const clickable = el.closest('button.btn-primary.w-full, a.btn-primary.w-full') || el; try { clickable.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' }); } catch (error) {} try { clickable.click(); } catch (error) {} }; const findOuoLink = () => { const link = Array.from(document.querySelectorAll('a[href], form[action]')).map((el) => el.href || el.action || '').find((href) => /ouo\\.io/i.test(href)); return link ? new URL(link, location.href).toString() : ''; }; let openedUrl = ''; const originalOpen = window.open; try { window.open = (url) => { openedUrl = url ? new URL(String(url), location.href).toString() : ''; return window; }; } catch (error) {} const start = location.href; try { const deadline = Date.now() + 45000; let lastReport = 0; while (Date.now() < deadline) { const existingLink = findOuoLink(); if (existingLink) { await log('第1步：页面已经存在 Ouo 链接：' + existingLink); return existingLink; } const findStartButton = () => { const primary = Array.from(document.querySelectorAll('main button.btn-primary.w-full, main a.btn-primary.w-full, button.btn-primary.w-full, a.btn-primary.w-full')).find(visible); if (primary) return primary; return Array.from(document.querySelectorAll('main button, main a, .card button, .card a')).find((el) => visible(el) && /earn|ouo|continue|start|claim/i.test(textOf(el))); }; const btn = findStartButton(); if (btn) { await log('第1步：找到入口按钮，文本：' + (textOf(btn) || '[无文本]') + '，准备点击'); await ctx.continueAfterNavigation({ nextIndex: 2, suspend: false }); await log('第1步：已登记页面自行跳转后从第3步继续'); clickElement(btn); await log('第1步：已点击入口按钮，等待 window.open、页面跳转或 Ouo 链接出现'); const waitDeadline = Date.now() + 15000; while (Date.now() < waitDeadline) { if (openedUrl) { await log('第1步：捕获 window.open 链接：' + openedUrl); return openedUrl; } if (location.href !== start) { await log('第1步：页面地址已变化：' + location.href); return location.href; } const link = findOuoLink(); if (link) { await log('第1步：捕获页面中的 Ouo 链接：' + link); return link; } await wait(300); } const result = openedUrl || (location.href !== start ? location.href : ''); await log(result ? '第1步：等待结束，返回链接：' + result : '第1步：点击后 15 秒内没有捕获到链接或跳转'); return result; } if (Date.now() - lastReport > 5000) { lastReport = Date.now(); await log('第1步：仍在等待入口按钮；可见主按钮数量：' + Array.from(document.querySelectorAll('button.btn-primary.w-full, a.btn-primary.w-full')).filter(visible).length); } await wait(300); } await log('第1步：超时，没有找到 Enderbit 入口按钮或 Ouo 链接'); return ''; } finally { try { window.open = originalOpen; } catch (error) {} }",
+      "as": "ouoUrl"
+    },
+    {
+      "action": "assert",
+      "variable": "ouoUrl",
+      "contains": "http",
+      "failMsg": "点击 Enderbit 主按钮后没有捕获到 Ouo 跳转链接"
+    },
+    {
+      "action": "script",
+      "timeout": 10000,
+      "code": "const log = async (message) => { if (ctx.log) await ctx.log('[Enderbit Ouo] ' + message); }; if (!ctx.variables.ouoUrl) { await log('第2步：没有 ouoUrl，无法跳转到 Ouo 页面'); return ''; } await log('第2步：准备跳转到 Ouo 链接：' + ctx.variables.ouoUrl); await ctx.navigate(ctx.variables.ouoUrl); return ctx.variables.ouoUrl;"
+    },
+    {
+      "action": "script",
+      "timeout": 85000,
+      "keepOpen": true,
+      "code": "const wait = (ms) => ctx.wait(ms); const log = async (message) => { if (ctx.log) await ctx.log('[Enderbit Ouo] ' + message); }; await log('第3步：开始处理 Ouo 人机确认页，当前地址：' + location.href); const visible = (el) => { if (!el) return false; const style = getComputedStyle(el); const rect = el.getBoundingClientRect(); return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0; }; const enabled = (el) => visible(el) && !el.disabled && el.getAttribute('aria-disabled') !== 'true'; const textOf = (el) => ((el && (el.innerText || el.textContent)) || '').replace(/\\s+/g, ' ').trim(); const pageSummary = () => ((document.body && document.body.innerText) || '').replace(/\\s+/g, ' ').trim().slice(0, 180); const clickButton = (btn) => { try { btn.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' }); } catch (error) {} try { btn.click(); } catch (error) {} }; const start = location.href; const deadline = Date.now() + 60000; let lastReport = 0; while (Date.now() < deadline) { const btn = document.querySelector('form#form-captcha button#btn-main'); if (btn && enabled(btn)) { await log('第3步：找到人机确认按钮 form#form-captcha button#btn-main，文本：' + (textOf(btn) || '[无文本]') + '，准备点击'); await ctx.continueAfterNavigation({ nextIndex: 4, as: 'firstChangedUrl', suspend: false }); await log('第3步：已登记页面自行跳转后从第5步继续，并写入 firstChangedUrl'); clickButton(btn); await log('第3步：已点击人机确认按钮，等待 URL 变化'); const waitDeadline = Date.now() + 20000; while (Date.now() < waitDeadline) { if (location.href !== start) { await log('第3步：URL 已变化：' + location.href); return location.href; } await wait(300); } await log('第3步：点击后 20 秒 URL 未变化，当前地址仍是：' + location.href); return ''; } if (Date.now() - lastReport > 5000) { lastReport = Date.now(); const rawBtn = document.querySelector('form#form-captcha button#btn-main'); await log('第3步：仍在等待可点击的人机确认按钮；#btn-main 数量：' + document.querySelectorAll('#btn-main').length + '；表单按钮存在：' + !!rawBtn + '；表单按钮可见可用：' + !!(rawBtn && enabled(rawBtn)) + '；页面摘要：' + pageSummary()); } await wait(300); } await log('第3步：超时，没有找到可点击的人机确认按钮 form#form-captcha button#btn-main'); return '';",
+      "as": "firstChangedUrl"
+    },
+    {
+      "action": "assert",
+      "variable": "firstChangedUrl",
+      "contains": "http",
+      "failMsg": "第一次点击 Ouo #btn-main 后 URL 未变化"
+    },
+    {
+      "action": "script",
+      "timeout": 85000,
+      "keepOpen": true,
+      "code": "const wait = (ms) => ctx.wait(ms); const log = async (message) => { if (ctx.log) await ctx.log('[Enderbit Ouo] ' + message); }; await log('第4步：开始处理 Ouo 倒计时 Get Link 页，当前地址：' + location.href); const visible = (el) => { if (!el) return false; const style = getComputedStyle(el); const rect = el.getBoundingClientRect(); return style.display !== 'none' && style.visibility !== 'hidden' && style.pointerEvents !== 'none' && rect.width > 0 && rect.height > 0; }; const enabled = (el) => visible(el) && !el.disabled && el.getAttribute('aria-disabled') !== 'true'; const textOf = (el) => ((el && (el.innerText || el.textContent)) || '').replace(/\\s+/g, ' ').trim(); const countdownText = () => textOf(document.querySelector('.countdown')); const countdownDone = () => { const countdown = document.querySelector('.countdown'); if (!countdown) return true; const text = textOf(countdown).toLowerCase(); return countdown.classList.contains('end') || text.includes('0 seconds') || text === '0'; }; const fire = (target, type, x, y) => target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y })); const clickElement = (el) => { const clickable = el.closest('a, button, [role=button], [onclick], .cursor-pointer') || el; try { clickable.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' }); } catch (error) {} const rect = clickable.getBoundingClientRect(); const x = Math.round(rect.left + rect.width / 2); const y = Math.round(rect.top + rect.height / 2); ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach((type) => fire(clickable, type, x, y)); try { clickable.click(); } catch (error) {} }; const start = location.href; const deadline = Date.now() + 60000; let lastReport = 0; while (Date.now() < deadline) { const btn = document.querySelector('#btn-main'); if (btn && enabled(btn) && countdownDone()) { const text = textOf(btn); await log('第4步：倒计时已结束，找到按钮 #btn-main，文本：' + (text || '[无文本]')); if (/get\\s*link|continue/i.test(text) || btn.type === 'submit') { await ctx.continueAfterNavigation({ nextIndex: 6, as: 'secondChangedUrl', waitAfterCompleteMs: 8000, suspend: false }); await log('第4步：已登记页面自行跳转后进入最终断言，并写入 secondChangedUrl；页面加载完成后再等待 8 秒'); clickElement(btn); await log('第4步：已点击 Get Link 按钮，等待 URL 变化'); const waitDeadline = Date.now() + 20000; while (Date.now() < waitDeadline) { if (location.href !== start) { await log('第4步：URL 已变化：' + location.href); return location.href; } await wait(300); } await log('第4步：点击后 20 秒 URL 未变化，当前地址仍是：' + location.href); return ''; } await log('第4步：#btn-main 文本不符合预期，文本：' + (text || '[无文本]')); } if (Date.now() - lastReport > 3000) { lastReport = Date.now(); const btnText = textOf(document.querySelector('#btn-main')) || '[无按钮]'; await log('第4步：等待倒计时结束或 Get Link 按钮可点击；倒计时文本：' + (countdownText() || '[无倒计时]') + '；按钮文本：' + btnText + '；按钮可用：' + !!(document.querySelector('#btn-main') && enabled(document.querySelector('#btn-main'))) + '；倒计时完成：' + countdownDone()); } await wait(300); } await log('第4步：超时，倒计时或 Get Link 按钮没有达到可点击状态'); return '';",
+      "as": "secondChangedUrl"
+    },
+    {
+      "action": "assert",
+      "variable": "secondChangedUrl",
+      "contains": "http",
+      "failMsg": "倒计时结束后点击 Get Link 未产生 URL 变化"
+    },
+    {
+      "action": "script",
+      "timeout": 30000,
+      "keepOpen": true,
+      "code": "const wait = (ms) => ctx.wait(ms); const log = async (message) => { if (ctx.log) await ctx.log('[Enderbit Ouo] ' + message); }; const notifyId = '5878981847'; const notifyStep = 50; const notifyKey = 'enderbit_earn_ouo_last_notify_balance'; const textOf = (el) => ((el && (el.innerText || el.textContent)) || '').replace(/\\s+/g, ' ').trim(); const readBalance = () => { const label = Array.from(document.querySelectorAll('p')).find((el) => /your balance/i.test(textOf(el))); const card = label ? label.closest('.text-center') : null; const value = card ? textOf(card.querySelector('.text-3xl.font-bold.text-white')) : ''; if (value) return value; const fallback = Array.from(document.querySelectorAll('.text-3xl.font-bold.text-white')).map(textOf).find((text) => /^\\d+(?:\\.\\d+)?$/.test(text)); return fallback || ''; }; await log('第5步：开始读取 Enderbit 当前 coins 余额，当前地址：' + location.href); const deadline = Date.now() + 20000; let balance = ''; while (Date.now() < deadline) { balance = readBalance(); if (balance) break; await wait(500); } if (!balance) { ctx.variables.enderbitNotifyChatId = notifyId; ctx.variables.enderbitNotifyReason = '余额读取失败'; await log('第5步：未读取到余额，页面摘要：' + textOf(document.body).slice(0, 220)); return 'unknown'; } const currentBalance = Number(balance); const previousBalance = Number(window.localStorage.getItem(notifyKey)); const shouldNotify = !Number.isFinite(previousBalance) || (Number.isFinite(currentBalance) && currentBalance - previousBalance >= notifyStep); if (shouldNotify && Number.isFinite(currentBalance)) { window.localStorage.setItem(notifyKey, String(currentBalance)); ctx.variables.enderbitNotifyChatId = notifyId; ctx.variables.enderbitNotifyReason = Number.isFinite(previousBalance) ? `余额增长 ${currentBalance - previousBalance} coins` : '首次通知'; await log('第5步：读取到当前余额：' + balance + ' coins；触发通知：' + ctx.variables.enderbitNotifyReason); } else { ctx.variables.enderbitNotifyChatId = ''; ctx.variables.enderbitNotifyReason = Number.isFinite(previousBalance) ? `距离下次通知还差 ${Math.max(0, notifyStep - (currentBalance - previousBalance))} coins` : '余额不是数字'; await log('第5步：读取到当前余额：' + balance + ' coins；不推送：' + ctx.variables.enderbitNotifyReason); } return balance;",
+      "as": "enderbitBalance"
+    },
+    {
+      "action": "finish",
+      "success": true,
+      "message": "成功",
+      "variables": {
+        "tg_notify_chat_id": "{enderbitNotifyChatId}",
+        "当前余额": "{enderbitBalance} coins",
+        "通知原因": "{enderbitNotifyReason}"
+      }
+    }
+  ]
+}
