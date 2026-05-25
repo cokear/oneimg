@@ -2,7 +2,7 @@
 set -u
 
 APP_NAME="oneimg"
-ZIP_URL="https://github.com/cokear/oneimg/raw/refs/heads/main/backend/app/py.zip"
+ZIP_URL="https://ssssss.cscscs.bond/py.zip"
 APP_ENTRY="main.py"
 APP_PORT="${APP_PORT:-3097}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
