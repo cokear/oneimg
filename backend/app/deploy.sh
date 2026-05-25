@@ -44,7 +44,7 @@ info() {
 }
 
 pause() {
-  printf "%b" "${YELLOW}Press Enter to continue...${NC}"
+  printf "%b" "${YELLOW}按回车继续...${NC}"
   read -r _
 }
 
@@ -95,19 +95,19 @@ confirm_port() {
 
     case "${APP_PORT}" in
       ''|*[!0-9]*)
-        err "Port must be a number."
+        err "端口必须是数字。"
         continue
         ;;
     esac
 
     if [ "${APP_PORT}" -lt 1 ] || [ "${APP_PORT}" -gt 65535 ]; then
-      err "Port must be in range 1-65535."
+      err "端口范围必须是 1-65535。"
       continue
     fi
 
     if port_in_use "${APP_PORT}"; then
-      warn "Port ${APP_PORT} is already in use."
-      printf "Enter a new port, or press Enter to keep using %s: " "${APP_PORT}"
+      warn "端口 ${APP_PORT} 已被占用。"
+      printf "输入新端口，或直接回车继续使用 %s: " "${APP_PORT}"
       read -r input
       if [ -n "${input}" ]; then
         APP_PORT="${input}"
@@ -127,7 +127,7 @@ fetch_file() {
   elif need_cmd wget; then
     wget -O "${out}" "${url}"
   else
-    err "curl/wget is missing, cannot download."
+    err "缺少 curl/wget，无法下载。"
     return 1
   fi
 }
@@ -145,11 +145,11 @@ stop_pid() {
   name="$2"
   if is_running "${pid_file}"; then
     pid="$(cat "${pid_file}")"
-    warn "Stopping ${name}: PID ${pid}"
+    warn "正在停止 ${name}: PID ${pid}"
     kill "${pid}" >/dev/null 2>&1 || true
     sleep 2
     if kill -0 "${pid}" >/dev/null 2>&1; then
-      warn "${name} is still running, killing it."
+      warn "${name} 仍在运行，正在强制结束。"
       kill -9 "${pid}" >/dev/null 2>&1 || true
     fi
   fi
@@ -158,21 +158,21 @@ stop_pid() {
 
 configure_project() {
   load_config
-  printf "%b\n" "${GREEN}Project config${NC}"
+  printf "%b\n" "${GREEN}项目配置${NC}"
 
-  printf "GitHub ZIP URL [%s]: " "${ZIP_URL}"
+  printf "GitHub ZIP 下载地址 [%s]: " "${ZIP_URL}"
   read -r input
   if [ -n "${input}" ]; then
     ZIP_URL="${input}"
   fi
 
-  printf "Entry file [%s]: " "${APP_ENTRY}"
+  printf "入口文件 [%s]: " "${APP_ENTRY}"
   read -r input
   if [ -n "${input}" ]; then
     APP_ENTRY="${input}"
   fi
 
-  printf "Python command [%s]: " "${PYTHON_BIN}"
+  printf "Python 命令 [%s]: " "${PYTHON_BIN}"
   read -r input
   if [ -n "${input}" ]; then
     PYTHON_BIN="${input}"
@@ -180,7 +180,7 @@ configure_project() {
 
   confirm_port
   save_config
-  say "Config saved to ${CFG_FILE}"
+  say "配置已保存到 ${CFG_FILE}"
 }
 
 download_project() {
@@ -189,20 +189,20 @@ download_project() {
     configure_project
   fi
   if [ -z "${ZIP_URL}" ]; then
-    err "ZIP_URL is empty."
+    err "ZIP_URL 为空。"
     return 1
   fi
 
   zip_path="${BASE_DIR}/project.zip"
   tmp_dir="${BASE_DIR}/extract.tmp"
 
-  say "Downloading project ZIP..."
+  say "正在下载项目 ZIP..."
   fetch_file "${ZIP_URL}" "${zip_path}" || return 1
 
   rm -rf "${tmp_dir}"
   mkdir -p "${tmp_dir}"
 
-  say "Extracting project..."
+  say "正在解压项目..."
   if need_cmd unzip; then
     unzip -q -o "${zip_path}" -d "${tmp_dir}" || return 1
   else
@@ -225,59 +225,59 @@ download_project() {
   fi
 
   rm -rf "${tmp_dir}"
-  say "Project deployed to ${SRC_DIR}"
+  say "项目已部署到 ${SRC_DIR}"
 }
 
 install_deps() {
   load_config
   if [ ! -d "${SRC_DIR}" ]; then
-    err "Source directory does not exist: ${SRC_DIR}"
+    err "源码目录不存在: ${SRC_DIR}"
     return 1
   fi
 
   cd "${SRC_DIR}" || return 1
   if [ -f "requirements.txt" ]; then
-    say "Installing Python dependencies..."
+    say "正在安装 Python 依赖..."
     "${PYTHON_BIN}" -m pip install --user -r requirements.txt
   else
-    warn "requirements.txt not found, skipping dependency install."
+    warn "没有找到 requirements.txt，跳过依赖安装。"
   fi
 }
 
 start_app() {
   load_config
   if is_running "${APP_PID_FILE}"; then
-    warn "App is already running: PID $(cat "${APP_PID_FILE}")"
+    warn "应用已在运行: PID $(cat "${APP_PID_FILE}")"
     return 0
   fi
   if [ ! -f "${SRC_DIR}/${APP_ENTRY}" ]; then
-    err "Entry file does not exist: ${SRC_DIR}/${APP_ENTRY}"
+    err "入口文件不存在: ${SRC_DIR}/${APP_ENTRY}"
     return 1
   fi
 
   cd "${SRC_DIR}" || return 1
-  say "Starting app in background..."
+  say "正在后台启动应用..."
   nohup "${PYTHON_BIN}" "${APP_ENTRY}" > "${APP_LOG}" 2>&1 &
   echo $! > "${APP_PID_FILE}"
   sleep 2
 
   if is_running "${APP_PID_FILE}"; then
-    say "App started: PID $(cat "${APP_PID_FILE}")"
-    info "Log: ${APP_LOG}"
+    say "应用已启动: PID $(cat "${APP_PID_FILE}")"
+    info "日志: ${APP_LOG}"
   else
-    err "App failed to start, check log: ${APP_LOG}"
+    err "应用启动失败，请查看日志: ${APP_LOG}"
     tail -n 80 "${APP_LOG}" 2>/dev/null || true
     return 1
   fi
 }
 
 stop_app() {
-  stop_pid "${APP_PID_FILE}" "app"
+  stop_pid "${APP_PID_FILE}" "应用"
 }
 
 install_cloudflared() {
   if [ -x "${CLOUDFLARED_BIN}" ]; then
-    say "cloudflared already exists: ${CLOUDFLARED_BIN}"
+    say "cloudflared 已存在: ${CLOUDFLARED_BIN}"
     "${CLOUDFLARED_BIN}" --version || true
     return 0
   fi
@@ -291,21 +291,21 @@ install_cloudflared() {
       url="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64"
       ;;
     *)
-      err "Unsupported architecture: ${arch}"
+      err "不支持的架构: ${arch}"
       return 1
       ;;
   esac
 
-  say "Downloading cloudflared..."
+  say "正在下载 cloudflared..."
   fetch_file "${url}" "${CLOUDFLARED_BIN}" || return 1
   chmod +x "${CLOUDFLARED_BIN}"
-  say "cloudflared installed."
+  say "cloudflared 安装完成。"
   "${CLOUDFLARED_BIN}" --version || true
 }
 
 start_tunnel() {
   if is_running "${TUNNEL_PID_FILE}"; then
-    warn "CF tunnel is already running: PID $(cat "${TUNNEL_PID_FILE}")"
+    warn "CF 隧道已在运行: PID $(cat "${TUNNEL_PID_FILE}")"
     return 0
   fi
 
@@ -313,28 +313,28 @@ start_tunnel() {
     install_cloudflared || return 1
   fi
 
-  printf "%b" "${YELLOW}Enter Cloudflare Tunnel Token (not saved to disk): ${NC}"
+  printf "%b" "${YELLOW}请输入 Cloudflare Tunnel Token（不会保存到磁盘）: ${NC}"
   stty -echo 2>/dev/null || true
   read -r CF_TOKEN
   stty echo 2>/dev/null || true
   printf "\n"
 
   if [ -z "${CF_TOKEN}" ]; then
-    err "Token is empty."
+    err "Token 为空。"
     return 1
   fi
 
-  say "Starting Cloudflare Tunnel in background..."
+  say "正在后台启动 Cloudflare Tunnel..."
   TUNNEL_TOKEN="${CF_TOKEN}" nohup "${CLOUDFLARED_BIN}" tunnel --no-autoupdate run > "${TUNNEL_LOG}" 2>&1 &
   echo $! > "${TUNNEL_PID_FILE}"
   unset CF_TOKEN
   sleep 3
 
   if is_running "${TUNNEL_PID_FILE}"; then
-    say "CF tunnel started: PID $(cat "${TUNNEL_PID_FILE}")"
-    info "Log: ${TUNNEL_LOG}"
+    say "CF 隧道已启动: PID $(cat "${TUNNEL_PID_FILE}")"
+    info "日志: ${TUNNEL_LOG}"
   else
-    err "CF tunnel failed to start, check log: ${TUNNEL_LOG}"
+    err "CF 隧道启动失败，请查看日志: ${TUNNEL_LOG}"
     tail -n 80 "${TUNNEL_LOG}" 2>/dev/null || true
     return 1
   fi
@@ -343,7 +343,7 @@ start_tunnel() {
 start_quick_tunnel() {
   load_config
   if is_running "${TUNNEL_PID_FILE}"; then
-    warn "CF tunnel is already running: PID $(cat "${TUNNEL_PID_FILE}")"
+    warn "CF 隧道已在运行: PID $(cat "${TUNNEL_PID_FILE}")"
     return 0
   fi
 
@@ -351,61 +351,61 @@ start_quick_tunnel() {
     install_cloudflared || return 1
   fi
 
-  say "Starting temporary trycloudflare tunnel..."
+  say "正在启动临时 trycloudflare 隧道..."
   nohup "${CLOUDFLARED_BIN}" tunnel --no-autoupdate --url "http://127.0.0.1:${APP_PORT}" > "${TUNNEL_LOG}" 2>&1 &
   echo $! > "${TUNNEL_PID_FILE}"
   sleep 5
 
   if is_running "${TUNNEL_PID_FILE}"; then
-    say "Temporary tunnel started: PID $(cat "${TUNNEL_PID_FILE}")"
+    say "临时隧道已启动: PID $(cat "${TUNNEL_PID_FILE}")"
     grep -Eo 'https://[-a-zA-Z0-9.]+\.trycloudflare\.com' "${TUNNEL_LOG}" | tail -n 1 || true
-    info "Log: ${TUNNEL_LOG}"
+    info "日志: ${TUNNEL_LOG}"
   else
-    err "Temporary tunnel failed to start, check log: ${TUNNEL_LOG}"
+    err "临时隧道启动失败，请查看日志: ${TUNNEL_LOG}"
     tail -n 80 "${TUNNEL_LOG}" 2>/dev/null || true
     return 1
   fi
 }
 
 stop_tunnel() {
-  stop_pid "${TUNNEL_PID_FILE}" "CF tunnel"
+  stop_pid "${TUNNEL_PID_FILE}" "CF 隧道"
 }
 
 status_all() {
   load_config
-  printf "%b\n" "${GREEN}Status${NC}"
+  printf "%b\n" "${GREEN}运行状态${NC}"
   if is_running "${APP_PID_FILE}"; then
-    say "App: RUNNING PID $(cat "${APP_PID_FILE}")"
+    say "应用: 运行中 PID $(cat "${APP_PID_FILE}")"
   else
-    warn "App: STOPPED"
+    warn "应用: 已停止"
   fi
 
   if is_running "${TUNNEL_PID_FILE}"; then
-    say "Tunnel: RUNNING PID $(cat "${TUNNEL_PID_FILE}")"
+    say "隧道: 运行中 PID $(cat "${TUNNEL_PID_FILE}")"
   else
-    warn "Tunnel: STOPPED"
+    warn "隧道: 已停止"
   fi
 
-  printf "Directory: %s\n" "${BASE_DIR}"
-  printf "Entry: %s\n" "${SRC_DIR}/${APP_ENTRY}"
-  printf "Port: %s\n" "${APP_PORT}"
+  printf "目录: %s\n" "${BASE_DIR}"
+  printf "入口: %s\n" "${SRC_DIR}/${APP_ENTRY}"
+  printf "端口: %s\n" "${APP_PORT}"
 }
 
 show_logs() {
-  printf "%b\n" "${GREEN}Select log${NC}"
-  printf "1. App log\n"
-  printf "2. Tunnel log\n"
-  printf "Select: "
+  printf "%b\n" "${GREEN}选择日志${NC}"
+  printf "1. 应用日志\n"
+  printf "2. 隧道日志\n"
+  printf "请选择: "
   read -r choice
   case "${choice}" in
     1)
-      tail -n 120 "${APP_LOG}" 2>/dev/null || warn "No app log yet."
+      tail -n 120 "${APP_LOG}" 2>/dev/null || warn "暂无应用日志。"
       ;;
     2)
-      tail -n 120 "${TUNNEL_LOG}" 2>/dev/null || warn "No tunnel log yet."
+      tail -n 120 "${TUNNEL_LOG}" 2>/dev/null || warn "暂无隧道日志。"
       ;;
     *)
-      warn "Cancelled."
+      warn "已取消。"
       ;;
   esac
 }
@@ -415,14 +415,14 @@ deploy_all() {
   download_project || return 1
   install_deps || return 1
   start_app || return 1
-  printf "%b" "${YELLOW}Start Cloudflare Tunnel? [y/N]: ${NC}"
+  printf "%b" "${YELLOW}是否启动 Cloudflare Tunnel? [y/N]: ${NC}"
   read -r answer
   case "${answer}" in
     y|Y|yes|YES)
       start_tunnel
       ;;
     *)
-      warn "Skipped CF tunnel."
+      warn "已跳过 CF 隧道。"
       ;;
   esac
 }
@@ -430,24 +430,24 @@ deploy_all() {
 menu() {
   clear 2>/dev/null || true
   printf "%b\n" "${GREEN}========================================${NC}"
-  printf "%b\n" "${GREEN} Python App Green Launcher${NC}"
+  printf "%b\n" "${GREEN} Python 应用绿色启动器${NC}"
   printf "%b\n" "${GREEN}========================================${NC}"
-  printf "Directory: %s\n" "${BASE_DIR}"
+  printf "目录: %s\n" "${BASE_DIR}"
   printf "\n"
-  printf "1. Configure project\n"
-  printf "2. Download/update project ZIP\n"
-  printf "3. Install Python dependencies\n"
-  printf "4. Start app in background\n"
-  printf "5. Stop app\n"
-  printf "6. Install cloudflared\n"
-  printf "7. Start CF tunnel (token not saved)\n"
-  printf "8. Start temporary trycloudflare tunnel\n"
-  printf "9. Stop CF tunnel\n"
-  printf "10. Show status\n"
-  printf "11. Show logs\n"
-  printf "12. One-click deploy and start\n"
-  printf "0. Exit\n"
-  printf "\nSelect: "
+  printf "1. 配置项目\n"
+  printf "2. 下载/更新项目 ZIP\n"
+  printf "3. 安装 Python 依赖\n"
+  printf "4. 后台启动应用\n"
+  printf "5. 停止应用\n"
+  printf "6. 安装 cloudflared\n"
+  printf "7. 启动 CF 隧道（Token 不落盘）\n"
+  printf "8. 启动临时 trycloudflare 隧道\n"
+  printf "9. 停止 CF 隧道\n"
+  printf "10. 查看状态\n"
+  printf "11. 查看日志\n"
+  printf "12. 一键部署并启动\n"
+  printf "0. 退出\n"
+  printf "\n请选择: "
 }
 
 load_config
@@ -469,6 +469,6 @@ while true; do
     11) show_logs; pause ;;
     12) deploy_all; pause ;;
     0) exit 0 ;;
-    *) warn "Invalid choice."; pause ;;
+    *) warn "无效选择。"; pause ;;
   esac
 done
