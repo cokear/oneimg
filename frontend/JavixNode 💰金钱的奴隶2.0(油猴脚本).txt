@@ -1,0 +1,189 @@
+// ==UserScript==
+// @name         JavixNode 💰金钱的奴隶
+// @namespace    http://tampermonkey.net/
+// @version      2.0
+// @match        *://dash.javixnode.fun/lv*
+// @match        *://*.linkvertise.com/*
+// @grant        none
+// @run-at       document-idle
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    // ==========================================
+    // 🎛️ 全局状态与控制
+    // ==========================================
+    let isPaused = false;
+    let uiStatusText;
+
+    // ==========================================
+    // 🎨 UI 面板注入模块
+    // ==========================================
+    function injectUI() {
+        if (document.getElementById('gemini-bot-ui')) return; // 防止重复注入
+
+        // 创建主容器
+        const uiContainer = document.createElement('div');
+        uiContainer.id = 'gemini-bot-ui';
+        uiContainer.style.cssText = `
+            position: fixed; top: 15px; right: 15px; z-index: 9999999;
+            background: rgba(15, 15, 20, 0.9); backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.1); border-radius: 8px;
+            padding: 10px 15px; display: flex; align-items: center; gap: 15px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5); font-family: sans-serif;
+            color: #fff; font-size: 13px; transition: 0.3s;
+        `;
+
+        // 创建状态显示文本
+        uiStatusText = document.createElement('span');
+        uiStatusText.innerText = '🟢 准备就绪';
+        uiStatusText.style.fontWeight = 'bold';
+        uiStatusText.style.minWidth = '120px';
+
+        // 创建暂停/继续按钮
+        const toggleBtn = document.createElement('button');
+        toggleBtn.innerText = '⏸️ 暂停';
+        toggleBtn.style.cssText = `
+            background: #ff4757; color: white; border: none; padding: 5px 12px;
+            border-radius: 5px; cursor: pointer; font-size: 12px; font-weight: bold;
+            transition: 0.2s;
+        `;
+
+        // 按钮点击事件
+        toggleBtn.onclick = () => {
+            isPaused = !isPaused;
+            if (isPaused) {
+                toggleBtn.innerText = '▶️ 继续';
+                toggleBtn.style.background = '#2ed573';
+                uiStatusText.innerText = '⏸️ 脚本已暂停';
+                uiStatusText.style.color = '#ff4757';
+            } else {
+                toggleBtn.innerText = '⏸️ 暂停';
+                toggleBtn.style.background = '#ff4757';
+                uiStatusText.style.color = '#fff';
+            }
+        };
+
+        uiContainer.appendChild(uiStatusText);
+        uiContainer.appendChild(toggleBtn);
+        document.body.appendChild(uiContainer);
+    }
+
+    // 更新面板状态文字的辅助函数
+    function updateStatus(msg) {
+        if (!isPaused && uiStatusText) {
+            uiStatusText.innerText = msg;
+            console.log(`[状态更新] ${msg}`);
+        }
+    }
+
+    // ==========================================
+    // 🧠 记忆系统：只要网址里有 r，就立刻存下来
+    // ==========================================
+    try {
+        const params = new URLSearchParams(window.location.search);
+        if (params.has('r')) {
+            const targetUrl = atob(decodeURIComponent(params.get('r')));
+            localStorage.setItem('lv_target_url', targetUrl);
+        }
+    } catch(e) {}
+
+    // ==========================================
+    // 🛡️ 后备防御：拦截新标签页
+    // ==========================================
+    const originalOpen = window.open;
+    window.open = function(url) {
+        window.location.href = url;
+        return null;
+    };
+
+    /**
+     * 辅助函数：查找并使用真实鼠标事件点击
+     */
+    function findAndClick(selector, textMatch = null) {
+        const elements = document.querySelectorAll(selector);
+        for (let el of elements) {
+            if (!textMatch || el.innerText.includes(textMatch) || el.textContent.includes(textMatch)) {
+                if (!el.disabled && !el.classList.contains('disabled') && el.offsetParent !== null) {
+                    const event = new MouseEvent('click', { view: window, bubbles: true, cancelable: true });
+                    el.dispatchEvent(event);
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    // 初始化面板
+    injectUI();
+
+    // ==========================================
+    // 🚀 主循环扫描器 (每 1.5 秒执行一次)
+    // ==========================================
+    const scanner = setInterval(() => {
+        // 1. 如果已暂停，直接跳过本轮执行
+        if (isPaused) return;
+
+        // 确保页面加载完后 UI 面板还在 (防止被某些单页应用刷新掉)
+        if (!document.getElementById('gemini-bot-ui')) injectUI();
+
+        const currentUrl = window.location.href;
+
+        // --- 步骤 1: JavixNode 初始页面 ---
+        if (currentUrl.includes("dash.javixnode.fun/lv")) {
+            updateStatus('🟢 点击生成链接...');
+            findAndClick('button[onclick="generate()"]');
+        }
+
+        // --- 步骤 4: Linkvertise 最终成功页面 (/success) ---
+        else if (currentUrl.includes("linkvertise.com/success")) {
+            updateStatus('✅ 提取记忆，准备跳转...');
+            const savedUrl = localStorage.getItem('lv_target_url');
+            if (savedUrl && savedUrl.includes('javixnode.fun')) {
+                localStorage.removeItem('lv_target_url');
+                clearInterval(scanner); // 停止定时器
+                updateStatus('🚀 正在跃迁回主站...');
+                window.location.href = savedUrl;
+                return;
+            } else {
+                updateStatus('⚠️ 强行点击 Open...');
+                findAndClick('button[data-testid="lv-button"]', 'Open');
+            }
+        }
+
+        // --- 步骤 3: Linkvertise 广告访问页面 (/access/) ---
+        else if (currentUrl.includes("linkvertise.com/access/")) {
+            // ✨ 新增逻辑：检测是否处于 "Wait XX:XX" 冷却状态
+            let isWaiting = false;
+            const durationElements = document.querySelectorAll('div.membership-price__wrapper__duration');
+
+            for (let el of durationElements) {
+                if (el.innerText.includes('Wait')) {
+                    isWaiting = true;
+                    // 提取倒计时文字并显示在面板上
+                    updateStatus(`⏳ 冷却中: ${el.innerText.trim()}`);
+                    break; // 找到倒计时就跳出循环
+                }
+            }
+
+            // 如果处于冷却状态，跳过点击操作，直接进入下一次扫描
+            if (isWaiting) {
+                return;
+            }
+
+            // 如果没有等待限制，正常执行点击
+            updateStatus('👁️ 正在处理广告步骤...');
+            findAndClick('div.membership-price__wrapper', 'Watch Ads');
+            findAndClick('button[data-testid="lv-button"]', 'Continue');
+        }
+
+        // --- 步骤 2: Linkvertise 首次跳转中转页 ---
+        else if (currentUrl.includes("linkvertise.com/") && !currentUrl.includes("/success")) {
+            updateStatus('🔗 获取目标链接...');
+            findAndClick('button[data-testid="lv-button"]', 'Get Link');
+        }
+
+    }, 1500);
+
+})();
