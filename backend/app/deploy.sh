@@ -63,7 +63,8 @@ pick_port() {
   while port_in_use "${APP_PORT}"; do
     warn "端口 ${APP_PORT} 已被占用。"
     printf "请输入新端口，或直接回车自动尝试下一个端口 [%s]: " "$((APP_PORT + 1))"
-    read -r input
+    # 修复管道输入问题
+    read -r input </dev/tty
     if [ -n "${input}" ]; then
       APP_PORT="${input}"
     else
@@ -101,13 +102,11 @@ stop_if_running() {
   rm -f "${pid_file}"
 }
 
-# ---------------------------------------------------------
-# 新增的卸载模块
-# ---------------------------------------------------------
 uninstall_app() {
   printf "\n%b\n" "${RED}=== 准备卸载 OneImg ===${NC}"
   printf "%b" "${YELLOW}此操作将杀掉程序进程并完全删除目录 [ ${BASE_DIR} ]，确定继续吗? [y/N]: ${NC}"
-  read -r confirm
+  # 修复管道输入问题
+  read -r confirm </dev/tty
   case "${confirm}" in
     y|Y|yes|YES)
       say "正在停止运行中的程序..."
@@ -129,26 +128,27 @@ uninstall_app() {
 ask_config() {
   printf "\n%b\n" "${YELLOW}=== 请配置探针和隧道环境变量 (直接回车表示留空/跳过) ===${NC}"
 
+  # 全部加上 </dev/tty 强制读取键盘，完美适配 curl | bash
   printf "1. UUID (节点的唯一标识): "
-  read -r ENV_UUID
+  read -r ENV_UUID </dev/tty
 
   printf "2. NEZHA_SERVER (哪吒面板的域名/IP，可带端口): "
-  read -r ENV_NEZHA_SERVER
+  read -r ENV_NEZHA_SERVER </dev/tty
 
   printf "3. NEZHA_PORT (针对老版 v0 面板专用，v1请留空): "
-  read -r ENV_NEZHA_PORT
+  read -r ENV_NEZHA_PORT </dev/tty
 
   printf "4. NEZHA_KEY (哪吒面板的 Agent 密钥): "
-  read -r ENV_NEZHA_KEY
+  read -r ENV_NEZHA_KEY </dev/tty
 
   printf "5. NEZHA_DOH (自定义安全 DNS 解析，防污染): "
-  read -r ENV_NEZHA_DOH
+  read -r ENV_NEZHA_DOH </dev/tty
 
   printf "6. CF_TUNNEL_TOKEN (用于脚本内置启动 Cloudflare 隧道): "
-  read -r ENV_CF_TUNNEL_TOKEN
+  read -r ENV_CF_TUNNEL_TOKEN </dev/tty
 
   printf "7. CF_DOMAIN (绑定的自定义域名): "
-  read -r ENV_CF_DOMAIN
+  read -r ENV_CF_DOMAIN </dev/tty
   
   printf "%b\n\n" "${YELLOW}======================================================${NC}"
 }
@@ -236,7 +236,6 @@ start_app() {
 }
 
 main() {
-  # 检查是否传入了 uninstall 参数
   if [ "${1:-}" = "uninstall" ]; then
     uninstall_app
   fi
