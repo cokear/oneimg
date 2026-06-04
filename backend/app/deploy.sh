@@ -13,10 +13,7 @@ BIN_DIR="${BASE_DIR}/bin"
 LOG_DIR="${BASE_DIR}/logs"
 RUN_DIR="${BASE_DIR}/run"
 APP_LOG="${LOG_DIR}/app.log"
-TUNNEL_LOG="${LOG_DIR}/tunnel.log"
 APP_PID_FILE="${RUN_DIR}/app.pid"
-TUNNEL_PID_FILE="${RUN_DIR}/tunnel.pid"
-CLOUDFLARED_BIN="${BIN_DIR}/cloudflared"
 
 GREEN="\033[0;32m"
 YELLOW="\033[1;33m"
@@ -104,6 +101,58 @@ stop_if_running() {
   rm -f "${pid_file}"
 }
 
+# ---------------------------------------------------------
+# 新增的卸载模块
+# ---------------------------------------------------------
+uninstall_app() {
+  printf "\n%b\n" "${RED}=== 准备卸载 OneImg ===${NC}"
+  printf "%b" "${YELLOW}此操作将杀掉程序进程并完全删除目录 [ ${BASE_DIR} ]，确定继续吗? [y/N]: ${NC}"
+  read -r confirm
+  case "${confirm}" in
+    y|Y|yes|YES)
+      say "正在停止运行中的程序..."
+      stop_if_running "${APP_PID_FILE}" "应用"
+      
+      say "正在删除安装目录: ${BASE_DIR}"
+      rm -rf "${BASE_DIR}"
+      
+      say "✅ 卸载完成，清理得干干净净！"
+      exit 0
+      ;;
+    *)
+      warn "已取消卸载。"
+      exit 0
+      ;;
+  esac
+}
+
+ask_config() {
+  printf "\n%b\n" "${YELLOW}=== 请配置探针和隧道环境变量 (直接回车表示留空/跳过) ===${NC}"
+
+  printf "1. UUID (节点的唯一标识): "
+  read -r ENV_UUID
+
+  printf "2. NEZHA_SERVER (哪吒面板的域名/IP，可带端口): "
+  read -r ENV_NEZHA_SERVER
+
+  printf "3. NEZHA_PORT (针对老版 v0 面板专用，v1请留空): "
+  read -r ENV_NEZHA_PORT
+
+  printf "4. NEZHA_KEY (哪吒面板的 Agent 密钥): "
+  read -r ENV_NEZHA_KEY
+
+  printf "5. NEZHA_DOH (自定义安全 DNS 解析，防污染): "
+  read -r ENV_NEZHA_DOH
+
+  printf "6. CF_TUNNEL_TOKEN (用于脚本内置启动 Cloudflare 隧道): "
+  read -r ENV_CF_TUNNEL_TOKEN
+
+  printf "7. CF_DOMAIN (绑定的自定义域名): "
+  read -r ENV_CF_DOMAIN
+  
+  printf "%b\n\n" "${YELLOW}======================================================${NC}"
+}
+
 download_and_extract() {
   zip_path="${BASE_DIR}/project.zip"
   tmp_dir="${BASE_DIR}/extract.tmp"
@@ -161,7 +210,18 @@ start_app() {
 
   cd "${SRC_DIR}" || exit 1
   say "正在后台启动应用，端口: ${APP_PORT}"
-  APP_PORT="${APP_PORT}" PORT="${APP_PORT}" nohup "${PYTHON_BIN}" "${APP_ENTRY}" > "${APP_LOG}" 2>&1 &
+
+  export PORT="${APP_PORT}"
+  export SERVER_PORT="${APP_PORT}"
+  [ -n "${ENV_UUID}" ] && export UUID="${ENV_UUID}"
+  [ -n "${ENV_NEZHA_SERVER}" ] && export NEZHA_SERVER="${ENV_NEZHA_SERVER}"
+  [ -n "${ENV_NEZHA_PORT}" ] && export NEZHA_PORT="${ENV_NEZHA_PORT}"
+  [ -n "${ENV_NEZHA_KEY}" ] && export NEZHA_KEY="${ENV_NEZHA_KEY}"
+  [ -n "${ENV_NEZHA_DOH}" ] && export NEZHA_DOH="${ENV_NEZHA_DOH}"
+  [ -n "${ENV_CF_TUNNEL_TOKEN}" ] && export CF_TUNNEL_TOKEN="${ENV_CF_TUNNEL_TOKEN}"
+  [ -n "${ENV_CF_DOMAIN}" ] && export CF_DOMAIN="${ENV_CF_DOMAIN}"
+
+  nohup "${PYTHON_BIN}" "${APP_ENTRY}" > "${APP_LOG}" 2>&1 &
   echo $! > "${APP_PID_FILE}"
   sleep 2
 
@@ -175,106 +235,32 @@ start_app() {
   fi
 }
 
-install_cloudflared() {
-  if [ -x "${CLOUDFLARED_BIN}" ]; then
-    return 0
-  fi
-
-  arch="$(uname -m)"
-  case "${arch}" in
-    x86_64|amd64)
-      url="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64"
-      ;;
-    aarch64|arm64)
-      url="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64"
-      ;;
-    *)
-      err "不支持的架构: ${arch}"
-      exit 1
-      ;;
-  esac
-
-  say "正在下载 cloudflared..."
-  fetch_file "${url}" "${CLOUDFLARED_BIN}"
-  chmod +x "${CLOUDFLARED_BIN}"
-}
-
-start_tunnel_with_token() {
-  printf "%b" "${YELLOW}是否启动 Cloudflare Tunnel? [y/N]: ${NC}"
-  read -r answer
-  case "${answer}" in
-    y|Y|yes|YES)
-      ;;
-    *)
-      warn "已跳过 CF 隧道。"
-      return 0
-      ;;
-  esac
-
-  install_cloudflared
-
-  printf "%b" "${YELLOW}请输入 Cloudflare Tunnel Token（不会保存到磁盘）: ${NC}"
-  stty -echo 2>/dev/null || true
-  read -r CF_TOKEN
-  stty echo 2>/dev/null || true
-  printf "\n"
-
-  if [ -z "${CF_TOKEN}" ]; then
-    warn "Token 为空，改用临时 trycloudflare 隧道。"
-    stop_if_running "${TUNNEL_PID_FILE}" "CF 隧道"
-    say "正在后台启动临时隧道..."
-    nohup "${CLOUDFLARED_BIN}" tunnel --no-autoupdate --url "http://127.0.0.1:${APP_PORT}" > "${TUNNEL_LOG}" 2>&1 &
-    echo $! > "${TUNNEL_PID_FILE}"
-    sleep 5
-    if is_running "${TUNNEL_PID_FILE}"; then
-      say "临时隧道已启动: PID $(cat "${TUNNEL_PID_FILE}")"
-      grep -Eo 'https://[-a-zA-Z0-9.]+\.trycloudflare\.com' "${TUNNEL_LOG}" | tail -n 1 || true
-      info "隧道日志: ${TUNNEL_LOG}"
-    else
-      err "临时隧道启动失败，最后日志如下:"
-      tail -n 80 "${TUNNEL_LOG}" 2>/dev/null || true
-    fi
-    return 0
-  fi
-
-  stop_if_running "${TUNNEL_PID_FILE}" "CF 隧道"
-
-  say "正在后台启动 CF 隧道..."
-  TUNNEL_TOKEN="${CF_TOKEN}" nohup "${CLOUDFLARED_BIN}" tunnel --no-autoupdate run > "${TUNNEL_LOG}" 2>&1 &
-  echo $! > "${TUNNEL_PID_FILE}"
-  unset CF_TOKEN
-  sleep 3
-
-  if is_running "${TUNNEL_PID_FILE}"; then
-    say "CF 隧道已启动: PID $(cat "${TUNNEL_PID_FILE}")"
-    info "隧道日志: ${TUNNEL_LOG}"
-  else
-    err "CF 隧道启动失败，最后日志如下:"
-    tail -n 80 "${TUNNEL_LOG}" 2>/dev/null || true
-  fi
-}
-
 main() {
+  # 检查是否传入了 uninstall 参数
+  if [ "${1:-}" = "uninstall" ]; then
+    uninstall_app
+  fi
+
   mkdir -p "${BASE_DIR}" "${SRC_DIR}" "${BIN_DIR}" "${LOG_DIR}" "${RUN_DIR}"
 
   printf "%b\n" "${GREEN}========================================${NC}"
-  printf "%b\n" "${GREEN} OneImg 一键部署启动脚本${NC}"
+  printf "%b\n" "${GREEN} OneImg 一键部署启动脚本 (集成交互与卸载)${NC}"
   printf "%b\n" "${GREEN}========================================${NC}"
   printf "项目地址: %s\n" "${ZIP_URL}"
   printf "安装目录: %s\n" "${BASE_DIR}"
   printf "默认端口: %s\n" "${APP_PORT}"
+  printf "卸载指令: bash $0 uninstall\n"
   printf "\n"
 
+  ask_config
   download_and_extract
   install_deps
   start_app
-  start_tunnel_with_token
 
   printf "\n"
-  say "完成。"
+  say "部署完成！"
   printf "应用日志: %s\n" "${APP_LOG}"
-  printf "隧道日志: %s\n" "${TUNNEL_LOG}"
-  printf "查看进程: ps -ef | grep -E 'main.py|cloudflared'\n"
+  printf "查看进程: ps -ef | grep -E 'main.py'\n"
 }
 
 main "$@"
