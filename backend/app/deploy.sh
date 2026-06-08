@@ -63,7 +63,6 @@ pick_port() {
   while port_in_use "${APP_PORT}"; do
     warn "端口 ${APP_PORT} 已被占用。"
     printf "请输入新端口，或直接回车自动尝试下一个端口 [%s]: " "$((APP_PORT + 1))"
-    # 修复管道输入问题
     read -r input </dev/tty
     if [ -n "${input}" ]; then
       APP_PORT="${input}"
@@ -105,7 +104,6 @@ stop_if_running() {
 uninstall_app() {
   printf "\n%b\n" "${RED}=== 准备卸载 OneImg ===${NC}"
   printf "%b" "${YELLOW}此操作将杀掉程序进程并完全删除目录 [ ${BASE_DIR} ]，确定继续吗? [y/N]: ${NC}"
-  # 修复管道输入问题
   read -r confirm </dev/tty
   case "${confirm}" in
     y|Y|yes|YES)
@@ -126,9 +124,8 @@ uninstall_app() {
 }
 
 ask_config() {
-  printf "\n%b\n" "${YELLOW}=== 请配置探针和隧道环境变量 (直接回车表示留空/跳过) ===${NC}"
+  printf "\n%b\n" "${YELLOW}=== 请配置运行环境变量 (直接回车表示留空/使用默认值) ===${NC}"
 
-  # 全部加上 </dev/tty 强制读取键盘，完美适配 curl | bash
   printf "1. UUID (节点的唯一标识): "
   read -r ENV_UUID </dev/tty
 
@@ -149,6 +146,10 @@ ask_config() {
 
   printf "7. CF_DOMAIN (绑定的自定义域名): "
   read -r ENV_CF_DOMAIN </dev/tty
+
+  # 【新增】节点信息的专属订阅路径
+  printf "8. SUB_PATH (节点订阅路径，防乱扫，留空默认 'sub'): "
+  read -r ENV_SUB_PATH </dev/tty
   
   printf "%b\n\n" "${YELLOW}======================================================${NC}"
 }
@@ -220,6 +221,9 @@ start_app() {
   [ -n "${ENV_NEZHA_DOH}" ] && export NEZHA_DOH="${ENV_NEZHA_DOH}"
   [ -n "${ENV_CF_TUNNEL_TOKEN}" ] && export CF_TUNNEL_TOKEN="${ENV_CF_TUNNEL_TOKEN}"
   [ -n "${ENV_CF_DOMAIN}" ] && export CF_DOMAIN="${ENV_CF_DOMAIN}"
+  
+  # 【新增】导出 SUB_PATH 环境变量
+  [ -n "${ENV_SUB_PATH}" ] && export SUB_PATH="${ENV_SUB_PATH}"
 
   nohup "${PYTHON_BIN}" "${APP_ENTRY}" > "${APP_LOG}" 2>&1 &
   echo $! > "${APP_PID_FILE}"
@@ -235,20 +239,13 @@ start_app() {
   fi
 }
 
-main() {
-  if [ "${1:-}" = "uninstall" ]; then
-    uninstall_app
-  fi
-
+run_install() {
   mkdir -p "${BASE_DIR}" "${SRC_DIR}" "${BIN_DIR}" "${LOG_DIR}" "${RUN_DIR}"
-
-  printf "%b\n" "${GREEN}========================================${NC}"
-  printf "%b\n" "${GREEN} OneImg 一键部署启动脚本 (集成交互与卸载)${NC}"
-  printf "%b\n" "${GREEN}========================================${NC}"
+  
+  printf "\n"
   printf "项目地址: %s\n" "${ZIP_URL}"
   printf "安装目录: %s\n" "${BASE_DIR}"
   printf "默认端口: %s\n" "${APP_PORT}"
-  printf "卸载指令: bash $0 uninstall\n"
   printf "\n"
 
   ask_config
@@ -260,6 +257,45 @@ main() {
   say "部署完成！"
   printf "应用日志: %s\n" "${APP_LOG}"
   printf "查看进程: ps -ef | grep -E 'main.py'\n"
+}
+
+show_menu() {
+  printf "%b\n" "${GREEN}========================================${NC}"
+  printf "%b\n" "${GREEN} OneImg 一键部署管理脚本 ${NC}"
+  printf "%b\n" "${GREEN}========================================${NC}"
+  printf "  ${YELLOW}1.${NC} 安装 / 更新应用\n"
+  printf "  ${YELLOW}2.${NC} 完全卸载应用\n"
+  printf "  ${YELLOW}0.${NC} 退出脚本\n"
+  printf "========================================\n"
+  printf "请输入数字选择 [0-2]: "
+  read -r choice </dev/tty
+  case "${choice}" in
+    1)
+      run_install
+      ;;
+    2)
+      uninstall_app
+      ;;
+    0)
+      exit 0
+      ;;
+    *)
+      err "输入无效，退出。"
+      exit 1
+      ;;
+  esac
+}
+
+main() {
+  # 如果依然有人喜欢用带参数的方式，我们也兼容
+  if [ "${1:-}" = "uninstall" ]; then
+    uninstall_app
+  elif [ "${1:-}" = "install" ]; then
+    run_install
+  else
+    # 默认直接弹出可视化的操作菜单
+    show_menu
+  fi
 }
 
 main "$@"
