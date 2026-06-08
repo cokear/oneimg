@@ -205,8 +205,35 @@ download_and_extract() {
 install_deps() {
   cd "${SRC_DIR}" || exit 1
   if [ -f "requirements.txt" ]; then
-    say "正在安装依赖..."
-    "${PYTHON_BIN}" -m pip install --user -r requirements.txt
+    # ==========================================
+    # 强力检测并自动修复 PIP 缺失问题
+    # ==========================================
+    if ! "${PYTHON_BIN}" -m pip --version >/dev/null 2>&1; then
+      warn "检测到系统未安装 pip，正在尝试自动安装补齐..."
+      if need_cmd apt-get; then
+        apt-get update -y && apt-get install -y python3-pip
+      elif need_cmd yum; then
+        yum install -y python3-pip
+      elif need_cmd apk; then
+        apk add py3-pip
+      else
+        say "尝试使用官方引导脚本安装 pip..."
+        curl -sS https://bootstrap.pypa.io/get-pip.py | "${PYTHON_BIN}"
+      fi
+    fi
+
+    if ! "${PYTHON_BIN}" -m pip --version >/dev/null 2>&1; then
+      err "自动安装 pip 失败，请您手动在系统里安装 python3-pip 后再试！"
+      exit 1
+    fi
+
+    say "正在安装 Python 依赖..."
+    # 解决部分新版系统(如 Ubuntu 23+) 的系统环境隔离保护报错
+    PIP_ARGS="--user"
+    if "${PYTHON_BIN}" -m pip help install 2>/dev/null | grep -q 'break-system-packages'; then
+      PIP_ARGS="--break-system-packages"
+    fi
+    "${PYTHON_BIN}" -m pip install ${PIP_ARGS} -r requirements.txt
   else
     warn "没有 requirements.txt，跳过依赖安装。"
   fi
