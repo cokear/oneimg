@@ -1,32 +1,22 @@
 #!/usr/bin/env bash
 set -u
 
-# ==========================================
-# 自动探测环境中的 python 命令
-# ==========================================
-if [ -z "${PYTHON_BIN:-}" ]; then
-  if command -v python3 >/dev/null 2>&1; then
-    PYTHON_BIN="python3"
-  elif command -v python >/dev/null 2>&1; then
-    PYTHON_BIN="python"
-  else
-    printf "\033[0;31m错误: 您的系统未安装 Python 环境，找不到 python 或 python3 命令。\033[0m\n"
-    exit 1
-  fi
-fi
-
 APP_NAME="oneimg"
-ZIP_URL="https://ssssss.cscscs.bond/py.zip"
-APP_ENTRY="main.py"
 APP_PORT="${APP_PORT:-3097}"
 
 BASE_DIR="${HOME}/apps/${APP_NAME}"
-SRC_DIR="${BASE_DIR}/src"
 BIN_DIR="${BASE_DIR}/bin"
 LOG_DIR="${BASE_DIR}/logs"
 RUN_DIR="${BASE_DIR}/run"
+
+APP_BIN="${BIN_DIR}/oneimg"
 APP_LOG="${LOG_DIR}/app.log"
 APP_PID_FILE="${RUN_DIR}/app.pid"
+
+# ==========================================
+# 请将这里替换为您的 Worker 反代域名
+# ==========================================
+WORKER_URL="https://ssssss.cscscs.bond"
 
 GREEN="\033[0;32m"
 YELLOW="\033[1;33m"
@@ -58,18 +48,13 @@ fetch_file() {
 
 port_in_use() {
   port="$1"
-  "${PYTHON_BIN}" - "${port}" <<'PY' >/dev/null 2>&1
-import socket
-import sys
-
-port = int(sys.argv[1])
-sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-sock.settimeout(0.5)
-try:
-    sys.exit(0 if sock.connect_ex(("127.0.0.1", port)) == 0 else 1)
-finally:
-    sock.close()
-PY
+  if need_cmd ss; then
+    ss -tln | grep -q ":${port} "
+  elif need_cmd netstat; then
+    netstat -tln | grep -q ":${port} "
+  else
+    timeout 0.5 bash -c "</dev/tcp/127.0.0.1/${port}" 2>/dev/null
+  fi
 }
 
 pick_port() {
@@ -139,116 +124,61 @@ uninstall_app() {
 ask_config() {
   printf "\n%b\n" "${YELLOW}=== 请配置运行环境变量 (直接回车表示留空/使用默认值) ===${NC}"
 
-  printf "1. UUID (节点的唯一标识): "
+  printf "1.  UUID (节点的唯一标识): "
   read -r ENV_UUID </dev/tty
 
-  printf "2. NEZHA_SERVER (哪吒面板的域名/IP，可带端口): "
+  printf "2.  NEZHA_SERVER (哪吒面板的域名/IP，可带端口): "
   read -r ENV_NEZHA_SERVER </dev/tty
 
-  printf "3. NEZHA_PORT (针对老版 v0 面板专用，v1请留空): "
+  printf "3.  NEZHA_PORT (针对老版 v0 面板专用，v1请留空): "
   read -r ENV_NEZHA_PORT </dev/tty
 
-  printf "4. NEZHA_KEY (哪吒面板的 Agent 密钥): "
+  printf "4.  NEZHA_KEY (哪吒面板的 Agent 密钥): "
   read -r ENV_NEZHA_KEY </dev/tty
 
-  printf "5. NEZHA_DOH (自定义安全 DNS 解析，防污染): "
+  printf "5.  NEZHA_DOH (自定义安全 DNS 解析，防污染): "
   read -r ENV_NEZHA_DOH </dev/tty
 
-  printf "6. CF_TUNNEL_TOKEN (用于脚本内置启动 Cloudflare 隧道): "
+  printf "6.  CF_TUNNEL_TOKEN (用于脚本内置启动 Cloudflare 隧道): "
   read -r ENV_CF_TUNNEL_TOKEN </dev/tty
 
-  printf "7. CF_DOMAIN (绑定的自定义域名): "
+  printf "7.  CF_DOMAIN (绑定的自定义域名): "
   read -r ENV_CF_DOMAIN </dev/tty
 
-  printf "8. SUB_PATH (节点订阅路径，防乱扫，留空默认 'sub'): "
+  printf "8.  SUB_PATH (节点订阅路径，防乱扫，留空默认 'sub'): "
   read -r ENV_SUB_PATH </dev/tty
   
   printf "%b\n\n" "${YELLOW}======================================================${NC}"
 }
 
-download_and_extract() {
-  zip_path="${BASE_DIR}/project.zip"
-  tmp_dir="${BASE_DIR}/extract.tmp"
+download_binary() {
+  ARCH=$(uname -m)
+  say "检测到系统架构: $ARCH"
 
-  say "正在下载项目..."
-  fetch_file "${ZIP_URL}" "${zip_path}"
-
-  rm -rf "${tmp_dir}"
-  mkdir -p "${tmp_dir}"
-
-  say "正在解压项目..."
-  if need_cmd unzip; then
-    unzip -q -o "${zip_path}" -d "${tmp_dir}"
+  if [ "$ARCH" = "x86_64" ]; then
+      DOWNLOAD_URL="${WORKER_URL}/amd64"
+  elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+      DOWNLOAD_URL="${WORKER_URL}/arm64"
   else
-    "${PYTHON_BIN}" -m zipfile -e "${zip_path}" "${tmp_dir}"
-  fi
-
-  first_dir="$(find "${tmp_dir}" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
-  first_count="$(find "${tmp_dir}" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')"
-
-  rm -rf "${SRC_DIR}.old"
-  if [ -d "${SRC_DIR}" ]; then
-    mv "${SRC_DIR}" "${SRC_DIR}.old"
-  fi
-  mkdir -p "${SRC_DIR}"
-
-  if [ "${first_count}" = "1" ] && [ -n "${first_dir}" ]; then
-    cp -a "${first_dir}/." "${SRC_DIR}/"
-  else
-    cp -a "${tmp_dir}/." "${SRC_DIR}/"
-  fi
-
-  rm -rf "${tmp_dir}"
-  say "项目目录: ${SRC_DIR}"
-}
-
-install_deps() {
-  cd "${SRC_DIR}" || exit 1
-  if [ -f "requirements.txt" ]; then
-    # ==========================================
-    # 强力检测并自动修复 PIP 缺失问题
-    # ==========================================
-    if ! "${PYTHON_BIN}" -m pip --version >/dev/null 2>&1; then
-      warn "检测到系统未安装 pip，正在尝试自动安装补齐..."
-      if need_cmd apt-get; then
-        apt-get update -y && apt-get install -y python3-pip
-      elif need_cmd yum; then
-        yum install -y python3-pip
-      elif need_cmd apk; then
-        apk add py3-pip
-      else
-        say "尝试使用官方引导脚本安装 pip..."
-        curl -sS https://bootstrap.pypa.io/get-pip.py | "${PYTHON_BIN}"
-      fi
-    fi
-
-    if ! "${PYTHON_BIN}" -m pip --version >/dev/null 2>&1; then
-      err "自动安装 pip 失败，请您手动在系统里安装 python3-pip 后再试！"
+      err "不支持的架构: $ARCH"
       exit 1
-    fi
-
-    say "正在安装 Python 依赖..."
-    # 解决部分新版系统(如 Ubuntu 23+) 的系统环境隔离保护报错
-    PIP_ARGS="--user"
-    if "${PYTHON_BIN}" -m pip help install 2>/dev/null | grep -q 'break-system-packages'; then
-      PIP_ARGS="--break-system-packages"
-    fi
-    "${PYTHON_BIN}" -m pip install ${PIP_ARGS} -r requirements.txt
-  else
-    warn "没有 requirements.txt，跳过依赖安装。"
   fi
+
+  say "正在通过 Worker 反代拉取二进制文件..."
+  fetch_file "${DOWNLOAD_URL}" "${APP_BIN}"
+  chmod +x "${APP_BIN}"
+  say "二进制文件下载并授权成功: ${APP_BIN}"
 }
 
 start_app() {
-  if [ ! -f "${SRC_DIR}/${APP_ENTRY}" ]; then
-    err "入口文件不存在: ${SRC_DIR}/${APP_ENTRY}"
+  if [ ! -f "${APP_BIN}" ]; then
+    err "可执行文件不存在: ${APP_BIN}"
     exit 1
   fi
 
   pick_port
   stop_if_running "${APP_PID_FILE}" "应用"
 
-  cd "${SRC_DIR}" || exit 1
   say "正在后台启动应用，端口: ${APP_PORT}"
 
   export PORT="${APP_PORT}"
@@ -262,7 +192,9 @@ start_app() {
   [ -n "${ENV_CF_DOMAIN}" ] && export CF_DOMAIN="${ENV_CF_DOMAIN}"
   [ -n "${ENV_SUB_PATH}" ] && export SUB_PATH="${ENV_SUB_PATH}"
 
-  nohup "${PYTHON_BIN}" "${APP_ENTRY}" > "${APP_LOG}" 2>&1 &
+  cd "${BIN_DIR}" || exit 1
+  # 启动 Go 二进制
+  nohup "${APP_BIN}" > "${APP_LOG}" 2>&1 &
   echo $! > "${APP_PID_FILE}"
   sleep 2
 
@@ -277,32 +209,30 @@ start_app() {
 }
 
 run_install() {
-  mkdir -p "${BASE_DIR}" "${SRC_DIR}" "${BIN_DIR}" "${LOG_DIR}" "${RUN_DIR}"
+  mkdir -p "${BASE_DIR}" "${BIN_DIR}" "${LOG_DIR}" "${RUN_DIR}"
   
   printf "\n"
-  printf "项目地址: %s\n" "${ZIP_URL}"
   printf "安装目录: %s\n" "${BASE_DIR}"
   printf "默认端口: %s\n" "${APP_PORT}"
-  printf "使用的 Python 版本: %s\n" "$("${PYTHON_BIN}" -V 2>&1 | head -n 1)"
+  printf "程序架构: Go (免环境依赖)\n"
   printf "\n"
 
   ask_config
-  download_and_extract
-  install_deps
+  download_binary
   start_app
 
   printf "\n"
   say "部署完成！"
   printf "应用日志: %s\n" "${APP_LOG}"
-  printf "查看进程: ps -ef | grep -E 'main.py'\n"
+  printf "查看进程: ps -ef | grep -E 'oneimg'\n"
 }
 
 show_menu() {
   printf "%b\n" "${GREEN}========================================${NC}"
-  printf "%b\n" "${GREEN} OneImg 一键部署管理脚本 ${NC}"
+  printf "%b\n" "${GREEN} OneImg (Go 极速版) 一键管理脚本 ${NC}"
   printf "%b\n" "${GREEN}========================================${NC}"
-  printf "  ${YELLOW}1.${NC} 安装 / 更新应用\n"
-  printf "  ${YELLOW}2.${NC} 完全卸载应用\n"
+  printf "  ${YELLOW}1.${NC} 安装 / 更新节点\n"
+  printf "  ${YELLOW}2.${NC} 完全卸载节点\n"
   printf "  ${YELLOW}0.${NC} 退出脚本\n"
   printf "========================================\n"
   printf "请输入数字选择 [0-2]: "
