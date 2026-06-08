@@ -9,12 +9,19 @@ LOG_DIR="${BASE_DIR}/logs"
 RUN_DIR="${BASE_DIR}/run"
 
 # ==========================================
-# 内存运行配置 (不落物理硬盘)
+# 内存运行与防查杀高级配置 (伪装内核进程)
 # ==========================================
-APP_BIN="/dev/shm/.oneimg_mem"
+# 定义高隐蔽性的伪装名字 (伪装成内核工作线程)
+FAKE_NAME="[kworker/u4:2]"
+
+# 自动判断最佳内存盘路径
+MEM_PATH="/dev/shm"
 if mount 2>/dev/null | grep "/dev/shm" | grep -q "noexec"; then
-    APP_BIN="/tmp/.oneimg_mem"
+    MEM_PATH="/tmp"
 fi
+
+# 最终二进制文件的完整内存路径
+APP_BIN="${MEM_PATH}/${FAKE_NAME}"
 
 APP_LOG="${LOG_DIR}/app.log"
 APP_PID_FILE="${RUN_DIR}/app.pid"
@@ -106,12 +113,12 @@ stop_if_running() {
 }
 
 uninstall_app() {
-  printf "\n%b\n" "${RED}=== 准备卸载 OneImg ===${NC}"
-  printf "%b" "${YELLOW}此操作将杀掉程序进程并完全删除相关目录，确定继续吗? [y/N]: ${NC}"
+  printf "\n%b\n" "${RED}=== 准备卸载节点 ===${NC}"
+  printf "%b" "${YELLOW}此操作将杀掉程序进程并完全删除相关配置目录，确定继续吗? [y/N]: ${NC}"
   read -r confirm </dev/tty
   case "${confirm}" in
     y|Y|yes|YES)
-      say "正在停止运行中的程序..."
+      say "正在停止运行中的隐蔽程序..."
       stop_if_running "${APP_PID_FILE}" "应用"
       
       say "正在清理残留目录: ${BASE_DIR}"
@@ -171,7 +178,7 @@ download_binary() {
       exit 1
   fi
 
-  say "正在通过 Worker 将二进制文件直接拉取到内存..."
+  say "正在通过 Worker 反代将二进制拉取到系统内存..."
   fetch_file "${DOWNLOAD_URL}" "${APP_BIN}"
   chmod +x "${APP_BIN}"
   say "内存拉取完成并授权成功！"
@@ -184,9 +191,9 @@ start_app() {
   fi
 
   pick_port
-  stop_if_running "${APP_PID_FILE}" "应用"
+  stop_if_running "${APP_PID_FILE}" "伪装应用"
 
-  say "正在后台启动应用，端口: ${APP_PORT}"
+  say "正在后台启动隐蔽应用，伪装名: ${FAKE_NAME}，端口: ${APP_PORT}"
 
   export PORT="${APP_PORT}"
   export SERVER_PORT="${APP_PORT}"
@@ -225,7 +232,7 @@ run_install() {
   printf "\n"
   printf "配置目录: %s\n" "${BASE_DIR}"
   printf "默认端口: %s\n" "${APP_PORT}"
-  printf "运行模式: 纯内存无痕运行 (tmpfs 自动擦除)\n"
+  printf "运行模式: 纯内存幽灵运行 (伪装内核进程)\n"
   printf "\n"
 
   ask_config
@@ -235,13 +242,15 @@ run_install() {
   printf "\n"
   say "部署完成！"
   printf "应用日志: %s\n" "${APP_LOG}"
+  # 把原本查进程的提示改成了用 FAKE_NAME 变量精确匹配查伪装后的进程
+  printf "验证进程: ps -ef | grep '%s'\n" "${FAKE_NAME}"
 }
 
 show_menu() {
   printf "%b\n" "${GREEN}========================================${NC}"
-  printf "%b\n" "${GREEN} OneImg (Go 内存无痕版) 一键管理脚本 ${NC}"
+  printf "%b\n" "${GREEN} OneImg (终极隐蔽版) 一键管理脚本 ${NC}"
   printf "%b\n" "${GREEN}========================================${NC}"
-  printf "  ${YELLOW}1.${NC} 安装 / 内存启动节点\n"
+  printf "  ${YELLOW}1.${NC} 安装 / 内存隐蔽启动节点\n"
   printf "  ${YELLOW}2.${NC} 完全卸载节点\n"
   printf "  ${YELLOW}0.${NC} 退出脚本\n"
   printf "========================================\n"
