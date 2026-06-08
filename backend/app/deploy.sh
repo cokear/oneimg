@@ -1,11 +1,24 @@
 #!/usr/bin/env bash
 set -u
 
+# ==========================================
+# 自动探测环境中的 python 命令
+# ==========================================
+if [ -z "${PYTHON_BIN:-}" ]; then
+  if command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN="python3"
+  elif command -v python >/dev/null 2>&1; then
+    PYTHON_BIN="python"
+  else
+    printf "\033[0;31m错误: 您的系统未安装 Python 环境，找不到 python 或 python3 命令。\033[0m\n"
+    exit 1
+  fi
+fi
+
 APP_NAME="oneimg"
 ZIP_URL="https://ssssss.cscscs.bond/py.zip"
 APP_ENTRY="main.py"
 APP_PORT="${APP_PORT:-3097}"
-PYTHON_BIN="${PYTHON_BIN:-python}"
 
 BASE_DIR="${HOME}/apps/${APP_NAME}"
 SRC_DIR="${BASE_DIR}/src"
@@ -147,7 +160,6 @@ ask_config() {
   printf "7. CF_DOMAIN (绑定的自定义域名): "
   read -r ENV_CF_DOMAIN </dev/tty
 
-  # 【新增】节点信息的专属订阅路径
   printf "8. SUB_PATH (节点订阅路径，防乱扫，留空默认 'sub'): "
   read -r ENV_SUB_PATH </dev/tty
   
@@ -221,8 +233,6 @@ start_app() {
   [ -n "${ENV_NEZHA_DOH}" ] && export NEZHA_DOH="${ENV_NEZHA_DOH}"
   [ -n "${ENV_CF_TUNNEL_TOKEN}" ] && export CF_TUNNEL_TOKEN="${ENV_CF_TUNNEL_TOKEN}"
   [ -n "${ENV_CF_DOMAIN}" ] && export CF_DOMAIN="${ENV_CF_DOMAIN}"
-  
-  # 【新增】导出 SUB_PATH 环境变量
   [ -n "${ENV_SUB_PATH}" ] && export SUB_PATH="${ENV_SUB_PATH}"
 
   nohup "${PYTHON_BIN}" "${APP_ENTRY}" > "${APP_LOG}" 2>&1 &
@@ -246,6 +256,7 @@ run_install() {
   printf "项目地址: %s\n" "${ZIP_URL}"
   printf "安装目录: %s\n" "${BASE_DIR}"
   printf "默认端口: %s\n" "${APP_PORT}"
+  printf "使用的 Python 版本: %s\n" "$("${PYTHON_BIN}" -V 2>&1 | head -n 1)"
   printf "\n"
 
   ask_config
@@ -287,13 +298,11 @@ show_menu() {
 }
 
 main() {
-  # 如果依然有人喜欢用带参数的方式，我们也兼容
   if [ "${1:-}" = "uninstall" ]; then
     uninstall_app
   elif [ "${1:-}" = "install" ]; then
     run_install
   else
-    # 默认直接弹出可视化的操作菜单
     show_menu
   fi
 }
