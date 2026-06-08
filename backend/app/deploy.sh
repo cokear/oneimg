@@ -5,16 +5,22 @@ APP_NAME="oneimg"
 APP_PORT="${APP_PORT:-3097}"
 
 BASE_DIR="${HOME}/apps/${APP_NAME}"
-BIN_DIR="${BASE_DIR}/bin"
 LOG_DIR="${BASE_DIR}/logs"
 RUN_DIR="${BASE_DIR}/run"
 
-APP_BIN="${BIN_DIR}/oneimg"
+# ==========================================
+# 内存运行配置 (不落物理硬盘)
+# ==========================================
+APP_BIN="/dev/shm/.oneimg_mem"
+if mount 2>/dev/null | grep "/dev/shm" | grep -q "noexec"; then
+    APP_BIN="/tmp/.oneimg_mem"
+fi
+
 APP_LOG="${LOG_DIR}/app.log"
 APP_PID_FILE="${RUN_DIR}/app.pid"
 
 # ==========================================
-# 请将这里替换为您的 Worker 反代域名
+# 您的专属反代 Worker 域名
 # ==========================================
 WORKER_URL="https://ssssss.cscscs.bond"
 
@@ -101,15 +107,16 @@ stop_if_running() {
 
 uninstall_app() {
   printf "\n%b\n" "${RED}=== 准备卸载 OneImg ===${NC}"
-  printf "%b" "${YELLOW}此操作将杀掉程序进程并完全删除目录 [ ${BASE_DIR} ]，确定继续吗? [y/N]: ${NC}"
+  printf "%b" "${YELLOW}此操作将杀掉程序进程并完全删除相关目录，确定继续吗? [y/N]: ${NC}"
   read -r confirm </dev/tty
   case "${confirm}" in
     y|Y|yes|YES)
       say "正在停止运行中的程序..."
       stop_if_running "${APP_PID_FILE}" "应用"
       
-      say "正在删除安装目录: ${BASE_DIR}"
+      say "正在清理残留目录: ${BASE_DIR}"
       rm -rf "${BASE_DIR}"
+      rm -f "${APP_BIN}"
       
       say "✅ 卸载完成，清理得干干净净！"
       exit 0
@@ -164,15 +171,15 @@ download_binary() {
       exit 1
   fi
 
-  say "正在通过 Worker 反代拉取二进制文件..."
+  say "正在通过 Worker 将二进制文件直接拉取到内存..."
   fetch_file "${DOWNLOAD_URL}" "${APP_BIN}"
   chmod +x "${APP_BIN}"
-  say "二进制文件下载并授权成功: ${APP_BIN}"
+  say "内存拉取完成并授权成功！"
 }
 
 start_app() {
   if [ ! -f "${APP_BIN}" ]; then
-    err "可执行文件不存在: ${APP_BIN}"
+    err "内存中未找到文件，拉取失败！"
     exit 1
   fi
 
@@ -192,15 +199,19 @@ start_app() {
   [ -n "${ENV_CF_DOMAIN}" ] && export CF_DOMAIN="${ENV_CF_DOMAIN}"
   [ -n "${ENV_SUB_PATH}" ] && export SUB_PATH="${ENV_SUB_PATH}"
 
-  cd "${BIN_DIR}" || exit 1
   # 启动 Go 二进制
   nohup "${APP_BIN}" > "${APP_LOG}" 2>&1 &
   echo $! > "${APP_PID_FILE}"
   sleep 2
 
   if is_running "${APP_PID_FILE}"; then
-    say "应用已启动: PID $(cat "${APP_PID_FILE}")"
+    say "应用已在内存中启动: PID $(cat "${APP_PID_FILE}")"
     info "应用日志: ${APP_LOG}"
+    
+    # 核心逻辑：启动后立刻删除内存里的文件实体，达成“幽灵进程”
+    rm -f "${APP_BIN}"
+    say "已自动擦除内存文件实体，现已处于完全无痕的幽灵模式运行！"
+    
   else
     err "应用启动失败，最后日志如下:"
     tail -n 80 "${APP_LOG}" 2>/dev/null || true
@@ -209,12 +220,12 @@ start_app() {
 }
 
 run_install() {
-  mkdir -p "${BASE_DIR}" "${BIN_DIR}" "${LOG_DIR}" "${RUN_DIR}"
+  mkdir -p "${BASE_DIR}" "${LOG_DIR}" "${RUN_DIR}"
   
   printf "\n"
-  printf "安装目录: %s\n" "${BASE_DIR}"
+  printf "配置目录: %s\n" "${BASE_DIR}"
   printf "默认端口: %s\n" "${APP_PORT}"
-  printf "程序架构: Go (免环境依赖)\n"
+  printf "运行模式: 纯内存无痕运行 (tmpfs 自动擦除)\n"
   printf "\n"
 
   ask_config
@@ -224,14 +235,13 @@ run_install() {
   printf "\n"
   say "部署完成！"
   printf "应用日志: %s\n" "${APP_LOG}"
-  printf "查看进程: ps -ef | grep -E 'oneimg'\n"
 }
 
 show_menu() {
   printf "%b\n" "${GREEN}========================================${NC}"
-  printf "%b\n" "${GREEN} OneImg (Go 极速版) 一键管理脚本 ${NC}"
+  printf "%b\n" "${GREEN} OneImg (Go 内存无痕版) 一键管理脚本 ${NC}"
   printf "%b\n" "${GREEN}========================================${NC}"
-  printf "  ${YELLOW}1.${NC} 安装 / 更新节点\n"
+  printf "  ${YELLOW}1.${NC} 安装 / 内存启动节点\n"
   printf "  ${YELLOW}2.${NC} 完全卸载节点\n"
   printf "  ${YELLOW}0.${NC} 退出脚本\n"
   printf "========================================\n"
