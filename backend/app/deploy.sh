@@ -11,24 +11,16 @@ RUN_DIR="${BASE_DIR}/run"
 # ==========================================
 # 内存运行与防查杀高级配置 (伪装内核进程)
 # ==========================================
-# 定义高隐蔽性的伪装名字 (伪装成内核工作线程，注意：名字里不能有斜杠)
 FAKE_NAME="[kworker-u4:2]"
-
-# 自动判断最佳内存盘路径
 MEM_PATH="/dev/shm"
 if mount 2>/dev/null | grep "/dev/shm" | grep -q "noexec"; then
     MEM_PATH="/tmp"
 fi
-
-# 最终二进制文件的完整内存路径
 APP_BIN="${MEM_PATH}/${FAKE_NAME}"
 
 APP_LOG="${LOG_DIR}/app.log"
 APP_PID_FILE="${RUN_DIR}/app.pid"
 
-# ==========================================
-# 您的专属反代 Worker 域名
-# ==========================================
 WORKER_URL="https://ssssss.cscscs.bond"
 
 GREEN="\033[0;32m"
@@ -73,6 +65,11 @@ port_in_use() {
 pick_port() {
   while port_in_use "${APP_PORT}"; do
     warn "端口 ${APP_PORT} 已被占用。"
+    # 如果是非交互模式，直接自动+1，不问人
+    if [ -n "${ENV_UUID:-}" ] || [ -n "${NON_INTERACTIVE:-}" ]; then
+       APP_PORT="$((APP_PORT + 1))"
+       continue
+    fi
     printf "请输入新端口，或直接回车自动尝试下一个端口 [%s]: " "$((APP_PORT + 1))"
     read -r input </dev/tty
     if [ -n "${input}" ]; then
@@ -114,28 +111,36 @@ stop_if_running() {
 
 uninstall_app() {
   printf "\n%b\n" "${RED}=== 准备卸载节点 ===${NC}"
-  printf "%b" "${YELLOW}此操作将杀掉程序进程并完全删除相关配置目录，确定继续吗? [y/N]: ${NC}"
-  read -r confirm </dev/tty
-  case "${confirm}" in
-    y|Y|yes|YES)
-      say "正在停止运行中的隐蔽程序..."
-      stop_if_running "${APP_PID_FILE}" "应用"
-      
-      say "正在清理残留目录: ${BASE_DIR}"
-      rm -rf "${BASE_DIR}"
-      rm -f "${APP_BIN}"
-      
-      say "✅ 卸载完成，清理得干干净净！"
-      exit 0
-      ;;
-    *)
-      warn "已取消卸载。"
-      exit 0
-      ;;
-  esac
+  # 如果非交互模式，不问人直接卸载
+  if [ -z "${NON_INTERACTIVE:-}" ]; then
+    printf "%b" "${YELLOW}此操作将杀掉程序进程并完全删除相关配置目录，确定继续吗? [y/N]: ${NC}"
+    read -r confirm </dev/tty
+    case "${confirm}" in
+      y|Y|yes|YES) ;;
+      *) warn "已取消卸载。"; exit 0 ;;
+    esac
+  fi
+  
+  say "正在停止运行中的隐蔽程序..."
+  stop_if_running "${APP_PID_FILE}" "应用"
+  
+  say "正在清理残留目录: ${BASE_DIR}"
+  rm -rf "${BASE_DIR}"
+  rm -f "${APP_BIN}"
+  
+  say "✅ 卸载完成，清理得干干净净！"
+  exit 0
 }
 
 ask_config() {
+  # ==========================================
+  # 核心改动：如果检测到预设变量，跳过互动问答！
+  # ==========================================
+  if [ -n "${ENV_UUID:-}" ] || [ -n "${NON_INTERACTIVE:-}" ]; then
+      say "检测到环境变量预设，已开启静默自动化模式，跳过手动问答！"
+      return
+  fi
+
   printf "\n%b\n" "${YELLOW}=== 请配置运行环境变量 (直接回车表示留空/使用默认值) ===${NC}"
 
   printf "1.  UUID (节点的唯一标识): "
@@ -197,14 +202,16 @@ start_app() {
 
   export PORT="${APP_PORT}"
   export SERVER_PORT="${APP_PORT}"
-  [ -n "${ENV_UUID}" ] && export UUID="${ENV_UUID}"
-  [ -n "${ENV_NEZHA_SERVER}" ] && export NEZHA_SERVER="${ENV_NEZHA_SERVER}"
-  [ -n "${ENV_NEZHA_PORT}" ] && export NEZHA_PORT="${ENV_NEZHA_PORT}"
-  [ -n "${ENV_NEZHA_KEY}" ] && export NEZHA_KEY="${ENV_NEZHA_KEY}"
-  [ -n "${ENV_NEZHA_DOH}" ] && export NEZHA_DOH="${ENV_NEZHA_DOH}"
-  [ -n "${ENV_CF_TUNNEL_TOKEN}" ] && export CF_TUNNEL_TOKEN="${ENV_CF_TUNNEL_TOKEN}"
-  [ -n "${ENV_CF_DOMAIN}" ] && export CF_DOMAIN="${ENV_CF_DOMAIN}"
-  [ -n "${ENV_SUB_PATH}" ] && export SUB_PATH="${ENV_SUB_PATH}"
+  
+  # 这里加上了 :- 语法，哪怕有些变量您在一行里没写，也不会引发报错中断
+  [ -n "${ENV_UUID:-}" ] && export UUID="${ENV_UUID}"
+  [ -n "${ENV_NEZHA_SERVER:-}" ] && export NEZHA_SERVER="${ENV_NEZHA_SERVER}"
+  [ -n "${ENV_NEZHA_PORT:-}" ] && export NEZHA_PORT="${ENV_NEZHA_PORT}"
+  [ -n "${ENV_NEZHA_KEY:-}" ] && export NEZHA_KEY="${ENV_NEZHA_KEY}"
+  [ -n "${ENV_NEZHA_DOH:-}" ] && export NEZHA_DOH="${ENV_NEZHA_DOH}"
+  [ -n "${ENV_CF_TUNNEL_TOKEN:-}" ] && export CF_TUNNEL_TOKEN="${ENV_CF_TUNNEL_TOKEN}"
+  [ -n "${ENV_CF_DOMAIN:-}" ] && export CF_DOMAIN="${ENV_CF_DOMAIN}"
+  [ -n "${ENV_SUB_PATH:-}" ] && export SUB_PATH="${ENV_SUB_PATH}"
 
   # 启动 Go 二进制
   nohup "${APP_BIN}" > "${APP_LOG}" 2>&1 &
@@ -215,7 +222,6 @@ start_app() {
     say "应用已在内存中启动: PID $(cat "${APP_PID_FILE}")"
     info "应用日志: ${APP_LOG}"
     
-    # 核心逻辑：启动后立刻删除内存里的文件实体，达成“幽灵进程”
     rm -f "${APP_BIN}"
     say "已自动擦除内存文件实体，现已处于完全无痕的幽灵模式运行！"
     
@@ -228,26 +234,15 @@ start_app() {
 
 run_install() {
   mkdir -p "${BASE_DIR}" "${LOG_DIR}" "${RUN_DIR}"
-  
-  printf "\n"
-  printf "配置目录: %s\n" "${BASE_DIR}"
-  printf "默认端口: %s\n" "${APP_PORT}"
-  printf "运行模式: 纯内存幽灵运行 (伪装内核进程)\n"
-  printf "\n"
-
   ask_config
   download_binary
   start_app
-
-  printf "\n"
-  say "部署完成！"
-  printf "应用日志: %s\n" "${APP_LOG}"
-  printf "验证进程: ps -ef | grep '%s'\n" "${FAKE_NAME}"
+  say "部署完成！验证进程: ps -ef | grep -F '${FAKE_NAME}' | grep -v grep"
 }
 
 show_menu() {
   printf "%b\n" "${GREEN}========================================${NC}"
-  printf "%b\n" "${GREEN} OneImg (终极隐蔽版) 一键管理脚本 ${NC}"
+  printf "%b\n" "${GREEN} OneImg (自动化隐蔽版) 一键管理脚本 ${NC}"
   printf "%b\n" "${GREEN}========================================${NC}"
   printf "  ${YELLOW}1.${NC} 安装 / 内存隐蔽启动节点\n"
   printf "  ${YELLOW}2.${NC} 完全卸载节点\n"
@@ -256,19 +251,10 @@ show_menu() {
   printf "请输入数字选择 [0-2]: "
   read -r choice </dev/tty
   case "${choice}" in
-    1)
-      run_install
-      ;;
-    2)
-      uninstall_app
-      ;;
-    0)
-      exit 0
-      ;;
-    *)
-      err "输入无效，退出。"
-      exit 1
-      ;;
+    1) run_install ;;
+    2) uninstall_app ;;
+    0) exit 0 ;;
+    *) err "输入无效，退出。"; exit 1 ;;
   esac
 }
 
