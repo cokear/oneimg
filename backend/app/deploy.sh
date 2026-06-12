@@ -123,15 +123,16 @@ uninstall_app() {
     esac
   fi
   
-  pkill -f "${FAKE_NAME}" >/dev/null 2>&1 || true
+  # 【修复大屠杀 Bug】：增加精确转义，防止误杀所有系统进程
+  pkill -f "\[kworker-u4:2\]" >/dev/null 2>&1 || true
   rm -f "${MEM_DIR}/${FAKE_NAME}" >/dev/null 2>&1 || true
   say "✅ 内存进程已强行终止，实体彻底灰飞烟灭！"
   exit 0
 }
 
 run_install() {
-  # 杀掉可能正在跑的老旧幽灵进程
-  pkill -f "${FAKE_NAME}" >/dev/null 2>&1 || true
+  # 【修复大屠杀 Bug】：增加精确转义，只杀幽灵本体
+  pkill -f "\[kworker-u4:2\]" >/dev/null 2>&1 || true
 
   ask_config
   pick_port
