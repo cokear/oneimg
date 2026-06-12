@@ -7,7 +7,7 @@ APP_PORT="${APP_PORT:-3097}"
 # ==========================================
 # 实体落盘模式配置
 # ==========================================
-BASE_DIR="${HOME}/${APP_NAME}"
+BASE_DIR="${HOME:-/root}/${APP_NAME}"
 LOG_DIR="${BASE_DIR}/logs"
 APP_BIN="${BASE_DIR}/${APP_NAME}-server"
 APP_LOG="${LOG_DIR}/app.log"
