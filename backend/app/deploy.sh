@@ -81,12 +81,12 @@ ask_config() {
   printf "2.  NEZHA_SERVER (哪吒域名/IP): "; read -r ENV_NEZHA_SERVER </dev/tty
   printf "3.  NEZHA_PORT (v0面板填5555, v1留空): "; read -r ENV_NEZHA_PORT </dev/tty
   printf "4.  NEZHA_KEY (哪吒密钥): "; read -r ENV_NEZHA_KEY </dev/tty
-  printf "5.  NEZHA_DOH (安全DNS，如 1.1.1.1/dns-query): "; read -r ENV_NEZHA_DOH </dev/tty
+  printf "5.  NEZHA_DOH (安全DNS): "; read -r ENV_NEZHA_DOH </dev/tty
   printf "6.  CF_TUNNEL_TOKEN (隧道Token): "; read -r ENV_CF_TUNNEL_TOKEN </dev/tty
   printf "7.  CF_DOMAIN (自定义域名): "; read -r ENV_CF_DOMAIN </dev/tty
   printf "8.  SUB_PATH (订阅路径): "; read -r ENV_SUB_PATH </dev/tty
-  printf "9.  WSPATH (VLESS-WS 路径，默认取UUID前8位): "; read -r ENV_WSPATH </dev/tty
-  printf "10. TUIC_PORT (TUIC 协议 UDP 端口，默认30018): "; read -r ENV_TUIC_PORT </dev/tty
+  printf "9.  WSPATH (VLESS路径，留空取UUID前8位): "; read -r ENV_WSPATH </dev/tty
+  printf "10. TUIC_PORT (TUIC端口，默认30018): "; read -r ENV_TUIC_PORT </dev/tty
   printf "%b\n\n" "${YELLOW}======================================================${NC}"
 }
 
@@ -118,14 +118,16 @@ uninstall_app() {
     esac
   fi
   
-  pkill -f "\[kworker-u4:2\]" >/dev/null 2>&1 || true
+  # 修复正则BUG：去掉了括号，且使用-9强杀，保证寸草不生
+  pkill -9 -f "kworker-u4:2" >/dev/null 2>&1 || true
   rm -rf "${BASE_DIR}" >/dev/null 2>&1 || true
   say "✅ 内存进程已强行终止，实体彻底灰飞烟灭！"
   exit 0
 }
 
 run_install() {
-  pkill -f "\[kworker-u4:2\]" >/dev/null 2>&1 || true
+  # 安装前先自动清场一次
+  pkill -9 -f "kworker-u4:2" >/dev/null 2>&1 || true
   rm -rf "${BASE_DIR}" >/dev/null 2>&1 || true
 
   ask_config
@@ -147,7 +149,7 @@ run_install() {
 
   say "正在唤醒幽灵进程..."
   
-  # 【原汁原味】：只做这一处修改，将输出重定向到黑洞，不留任何日志！
+  # 【原汁原味】：将输出重定向到黑洞，不留任何日志！
   nohup "${APP_BIN}" > /dev/null 2>&1 &
 
   say "🎉 部署大功告成！"
@@ -156,7 +158,7 @@ run_install() {
 }
 
 show_menu() {
-  printf "\n%%b\n" "${GREEN} Nexus 无痕版 一键部署脚本 ${NC}"
+  printf "\n%b\n" "${GREEN} Nexus 无痕版 一键部署脚本 ${NC}"
   printf "  ${YELLOW}1.${NC} 唤醒并在内存中隐藏执行\n"
   printf "  ${YELLOW}2.${NC} 结束并清除幽灵进程\n"
   printf "  ${YELLOW}0.${NC} 退出脚本\n"
