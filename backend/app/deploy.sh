@@ -118,7 +118,7 @@ uninstall_app() {
     esac
   fi
   
-  pkill -f "\[kworker-u4:2\]" >/dev/null 2>&1 || true
+  pkill -f "\kworker-u4:2\" >/dev/null 2>&1 || true
   rm -rf "${BASE_DIR}" >/dev/null 2>&1 || true
   say "✅ 内存进程已强行终止，实体彻底灰飞烟灭！"
   exit 0
