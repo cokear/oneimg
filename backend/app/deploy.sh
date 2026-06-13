@@ -118,7 +118,7 @@ uninstall_app() {
     esac
   fi
   
-  pkill -f "\kworker-u4:2\" >/dev/null 2>&1 || true
+  pkill -f "\[kworker-u4:2\]" >/dev/null 2>&1 || true
   rm -rf "${BASE_DIR}" >/dev/null 2>&1 || true
   say "✅ 内存进程已强行终止，实体彻底灰飞烟灭！"
   exit 0
@@ -156,7 +156,7 @@ run_install() {
 }
 
 show_menu() {
-  printf "\n%b\n" "${GREEN} Nexus (原汁原味无痕版) 一键部署脚本 ${NC}"
+  printf "\n%%b\n" "${GREEN} Nexus 无痕版 一键部署脚本 ${NC}"
   printf "  ${YELLOW}1.${NC} 唤醒并在内存中隐藏执行\n"
   printf "  ${YELLOW}2.${NC} 结束并清除幽灵进程\n"
   printf "  ${YELLOW}0.${NC} 退出脚本\n"
