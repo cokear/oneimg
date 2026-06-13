@@ -124,13 +124,15 @@ SUB_PATH=${ENV_SUB_PATH:-}
 WSPATH=${ENV_WSPATH:-}
 TUIC_PORT=${ENV_TUIC_PORT:-}
 EOF
+  # 强制剔除可能带入的 Windows 回车符，防止底层解析暴毙
+  sed -i 's/\r$//' "${APP_ENV}" 2>/dev/null || true
 }
 
 setup_systemd() {
   if [ "$(id -u)" != "0" ] || ! need_cmd systemctl; then
     warn "当前不是 root 或者不支持 systemd，采用传统后台模式启动。"
     export $(grep -v '^#' "${APP_ENV}" | xargs)
-    nohup "${APP_BIN}" > "${APP_LOG}" 2>&1 &
+    nohup "${APP_BIN}" >> "${APP_LOG}" 2>&1 &
     say "程序已启动 (nohup)。日志路径: ${APP_LOG}"
     return
   fi
@@ -148,11 +150,10 @@ Type=simple
 User=root
 WorkingDirectory=${BASE_DIR}
 EnvironmentFile=${APP_ENV}
-ExecStart=${APP_BIN}
+# 【绝对修复】：使用底层 bash 进行日志重定向，兼容全宇宙的老版本 Systemd
+ExecStart=/bin/bash -c "exec ${APP_BIN} >> ${APP_LOG} 2>&1"
 Restart=always
 RestartSec=5
-StandardOutput=append:${APP_LOG}
-StandardError=append:${APP_LOG}
 
 [Install]
 WantedBy=multi-user.target
@@ -188,7 +189,6 @@ uninstall_app() {
     systemctl daemon-reload
   fi
   
-  # 彻底斩首进程并清空工作目录
   pkill -9 -f "${APP_BIN}" >/dev/null 2>&1 || true
   rm -rf "${BASE_DIR}"
   say "✅ 实体版本已完全卸载并清理干净！"
@@ -196,9 +196,7 @@ uninstall_app() {
 }
 
 run_install() {
-  # 覆盖安装前先确保老进程死透了
   pkill -9 -f "${APP_BIN}" >/dev/null 2>&1 || true
-
   mkdir -p "${BASE_DIR}" "${LOG_DIR}"
   ask_config
   pick_port
@@ -209,7 +207,7 @@ run_install() {
 }
 
 show_menu() {
-  printf "\n%b\n" "${GREEN} Nexus (VPS 实体常驻版) 一键管理脚本 ${NC}"
+  printf "\n%%b\n" "${GREEN} Nexus (VPS 实体常驻版) 一键管理脚本 ${NC}"
   printf "  ${YELLOW}1.${NC} 安装 / Systemd 启动服务\n"
   printf "  ${YELLOW}2.${NC} 完全卸载节点\n"
   printf "  ${YELLOW}0.${NC} 退出脚本\n"
