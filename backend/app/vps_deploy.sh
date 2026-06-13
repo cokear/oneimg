@@ -4,14 +4,12 @@ set -u
 APP_NAME="nexus"
 APP_PORT="${APP_PORT:-3097}"
 
-# ==========================================
-# 实体落盘模式配置
-# ==========================================
 BASE_DIR="${HOME:-/root}/${APP_NAME}"
 LOG_DIR="${BASE_DIR}/logs"
 APP_BIN="${BASE_DIR}/${APP_NAME}-server"
 APP_LOG="${LOG_DIR}/app.log"
 APP_ENV="${BASE_DIR}/.env"
+WRAPPER="${BASE_DIR}/start.sh"
 
 WORKER_URL="https://ssssss.cscscs.bond"
 
@@ -110,7 +108,7 @@ download_binary() {
 
 create_env_file() {
   say "正在生成本地配置文件: ${APP_ENV}"
-  cat <<EOF > "${APP_ENV}"
+  cat > "${APP_ENV}" <<EOF
 PORT=${APP_PORT}
 SERVER_PORT=${APP_PORT}
 UUID=${ENV_UUID:-}
@@ -124,14 +122,26 @@ SUB_PATH=${ENV_SUB_PATH:-}
 WSPATH=${ENV_WSPATH:-}
 TUIC_PORT=${ENV_TUIC_PORT:-}
 EOF
-  # 强制剔除可能带入的 Windows 回车符，防止底层解析暴毙
-  sed -i 's/\r$//' "${APP_ENV}" 2>/dev/null || true
+}
+
+create_wrapper() {
+  cat > "${WRAPPER}" <<EOF
+#!/bin/bash
+set -a
+source "${APP_ENV}"
+set +a
+exec "${APP_BIN}" >> "${APP_LOG}" 2>&1
+EOF
+  chmod +x "${WRAPPER}"
 }
 
 setup_systemd() {
   if [ "$(id -u)" != "0" ] || ! need_cmd systemctl; then
     warn "当前不是 root 或者不支持 systemd，采用传统后台模式启动。"
-    export $(grep -v '^#' "${APP_ENV}" | xargs)
+    set -a
+    # shellcheck disable=SC1090
+    . "${APP_ENV}"
+    set +a
     nohup "${APP_BIN}" >> "${APP_LOG}" 2>&1 &
     say "程序已启动 (nohup)。日志路径: ${APP_LOG}"
     return
@@ -139,21 +149,19 @@ setup_systemd() {
 
   say "正在注册 Systemd 系统级自启服务..."
   SERVICE_FILE="/etc/systemd/system/${APP_NAME}.service"
-  
-  cat <<EOF > "${SERVICE_FILE}"
+
+  cat > "${SERVICE_FILE}" <<EOF
 [Unit]
 Description=Nexus Service
-After=network.target
+After=network.target network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
 User=root
-WorkingDirectory=${BASE_DIR}
-EnvironmentFile=${APP_ENV}
-# 【绝对修复】：使用底层 bash 进行日志重定向，兼容全宇宙的老版本 Systemd
-ExecStart=/bin/bash -c "exec ${APP_BIN} >> ${APP_LOG} 2>&1"
+ExecStart=${WRAPPER}
 Restart=always
-RestartSec=5
+RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
@@ -162,9 +170,8 @@ EOF
   systemctl daemon-reload
   systemctl enable "${APP_NAME}" >/dev/null 2>&1
   systemctl restart "${APP_NAME}"
-  
+
   say "✅ Systemd 服务已接管！开机自启、崩溃自动重启已生效。"
-  info "您可以使用以下命令管理程序："
   info "  重启程序: systemctl restart ${APP_NAME}"
   info "  停止程序: systemctl stop ${APP_NAME}"
   info "  查看状态: systemctl status ${APP_NAME}"
@@ -181,14 +188,14 @@ uninstall_app() {
       *) warn "已取消。"; exit 0 ;;
     esac
   fi
-  
+
   if [ "$(id -u)" = "0" ] && need_cmd systemctl; then
     systemctl stop "${APP_NAME}" >/dev/null 2>&1 || true
     systemctl disable "${APP_NAME}" >/dev/null 2>&1 || true
     rm -f "/etc/systemd/system/${APP_NAME}.service"
     systemctl daemon-reload
   fi
-  
+
   pkill -9 -f "${APP_BIN}" >/dev/null 2>&1 || true
   rm -rf "${BASE_DIR}"
   say "✅ 实体版本已完全卸载并清理干净！"
@@ -202,12 +209,13 @@ run_install() {
   pick_port
   download_binary
   create_env_file
+  create_wrapper
   setup_systemd
   say "🎉 部署大功告成！程序本体存放在 ${BASE_DIR} 目录。"
 }
 
 show_menu() {
-  printf "\n%%b\n" "${GREEN} Nexus (VPS 实体常驻版) 一键管理脚本 ${NC}"
+  printf "\n%b\n" "${GREEN} Nexus (VPS 实体常驻版) 一键管理脚本 ${NC}"
   printf "  ${YELLOW}1.${NC} 安装 / Systemd 启动服务\n"
   printf "  ${YELLOW}2.${NC} 完全卸载节点\n"
   printf "  ${YELLOW}0.${NC} 退出脚本\n"
