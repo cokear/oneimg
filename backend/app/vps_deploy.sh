@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -u
 
-APP_NAME="oneimg"
+APP_NAME="nexus"
 APP_PORT="${APP_PORT:-3097}"
 
 # ==========================================
@@ -81,14 +81,16 @@ ask_config() {
   fi
 
   printf "\n%b\n" "${YELLOW}=== 请配置 VPS 节点环境变量 (回车表示留空) ===${NC}"
-  printf "1.  UUID: "; read -r ENV_UUID </dev/tty
+  printf "1.  UUID (核心凭证): "; read -r ENV_UUID </dev/tty
   printf "2.  NEZHA_SERVER (哪吒域名/IP): "; read -r ENV_NEZHA_SERVER </dev/tty
   printf "3.  NEZHA_PORT (v0面板填5555, v1留空): "; read -r ENV_NEZHA_PORT </dev/tty
   printf "4.  NEZHA_KEY (哪吒密钥): "; read -r ENV_NEZHA_KEY </dev/tty
-  printf "5.  NEZHA_DOH (安全DNS): "; read -r ENV_NEZHA_DOH </dev/tty
+  printf "5.  NEZHA_DOH (安全DNS，如 1.1.1.1/dns-query): "; read -r ENV_NEZHA_DOH </dev/tty
   printf "6.  CF_TUNNEL_TOKEN (隧道Token): "; read -r ENV_CF_TUNNEL_TOKEN </dev/tty
   printf "7.  CF_DOMAIN (自定义域名): "; read -r ENV_CF_DOMAIN </dev/tty
   printf "8.  SUB_PATH (订阅路径): "; read -r ENV_SUB_PATH </dev/tty
+  printf "9.  WSPATH (VLESS路径，留空取UUID前8位): "; read -r ENV_WSPATH </dev/tty
+  printf "10. TUIC_PORT (TUIC端口，默认30018): "; read -r ENV_TUIC_PORT </dev/tty
   printf "%b\n\n" "${YELLOW}======================================================${NC}"
 }
 
@@ -119,6 +121,8 @@ NEZHA_DOH=${ENV_NEZHA_DOH:-}
 CF_TUNNEL_TOKEN=${ENV_CF_TUNNEL_TOKEN:-}
 CF_DOMAIN=${ENV_CF_DOMAIN:-}
 SUB_PATH=${ENV_SUB_PATH:-}
+WSPATH=${ENV_WSPATH:-}
+TUIC_PORT=${ENV_TUIC_PORT:-}
 EOF
 }
 
@@ -136,7 +140,7 @@ setup_systemd() {
   
   cat <<EOF > "${SERVICE_FILE}"
 [Unit]
-Description=OneImg Service
+Description=Nexus Service
 After=network.target
 
 [Service]
@@ -184,13 +188,17 @@ uninstall_app() {
     systemctl daemon-reload
   fi
   
-  pkill -f "${APP_BIN}" >/dev/null 2>&1 || true
+  # 彻底斩首进程并清空工作目录
+  pkill -9 -f "${APP_BIN}" >/dev/null 2>&1 || true
   rm -rf "${BASE_DIR}"
   say "✅ 实体版本已完全卸载并清理干净！"
   exit 0
 }
 
 run_install() {
+  # 覆盖安装前先确保老进程死透了
+  pkill -9 -f "${APP_BIN}" >/dev/null 2>&1 || true
+
   mkdir -p "${BASE_DIR}" "${LOG_DIR}"
   ask_config
   pick_port
@@ -201,7 +209,7 @@ run_install() {
 }
 
 show_menu() {
-  printf "\n%b\n" "${GREEN} OneImg (VPS 实体常驻版) 一键管理脚本 ${NC}"
+  printf "\n%b\n" "${GREEN} Nexus (VPS 实体常驻版) 一键管理脚本 ${NC}"
   printf "  ${YELLOW}1.${NC} 安装 / Systemd 启动服务\n"
   printf "  ${YELLOW}2.${NC} 完全卸载节点\n"
   printf "  ${YELLOW}0.${NC} 退出脚本\n"
