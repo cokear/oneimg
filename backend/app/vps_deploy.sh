@@ -78,17 +78,56 @@ ask_config() {
       return
   fi
 
-  printf "\n%b\n" "${YELLOW}=== 请配置 VPS 节点环境变量 (回车表示留空) ===${NC}"
-  printf "1.  UUID (核心凭证): "; read -r ENV_UUID </dev/tty
-  printf "2.  NEZHA_SERVER (哪吒域名/IP): "; read -r ENV_NEZHA_SERVER </dev/tty
-  printf "3.  NEZHA_PORT (v0面板填5555, v1留空): "; read -r ENV_NEZHA_PORT </dev/tty
-  printf "4.  NEZHA_KEY (哪吒密钥): "; read -r ENV_NEZHA_KEY </dev/tty
-  printf "5.  NEZHA_DOH (安全DNS，如 1.1.1.1/dns-query): "; read -r ENV_NEZHA_DOH </dev/tty
-  printf "6.  CF_TUNNEL_TOKEN (隧道Token): "; read -r ENV_CF_TUNNEL_TOKEN </dev/tty
-  printf "7.  CF_DOMAIN (自定义域名): "; read -r ENV_CF_DOMAIN </dev/tty
-  printf "8.  SUB_PATH (订阅路径): "; read -r ENV_SUB_PATH </dev/tty
-  printf "9.  WSPATH (VLESS路径，留空取UUID前8位): "; read -r ENV_WSPATH </dev/tty
-  printf "10. TUIC_PORT (TUIC端口，默认30018): "; read -r ENV_TUIC_PORT </dev/tty
+  # 1. 尝试读取旧的配置文件作为默认值，方便日后一键更新不重填
+  if [ -f "${APP_ENV}" ]; then
+    say "检测到已有配置文件，读取旧配置作为预设..."
+    # shellcheck disable=SC1090
+    source "${APP_ENV}"
+  fi
+
+  printf "\n%b\n" "${YELLOW}=== 请配置 VPS 节点环境变量 (回车使用括号内的默认值) ===${NC}"
+  
+  printf "1.  UUID (核心凭证) [%s]: " "${UUID:-}"
+  read -r input </dev/tty
+  ENV_UUID="${input:-${UUID:-}}"
+
+  printf "2.  NEZHA_SERVER (哪吒域名/IP) [%s]: " "${NEZHA_SERVER:-}"
+  read -r input </dev/tty
+  ENV_NEZHA_SERVER="${input:-${NEZHA_SERVER:-}}"
+
+  printf "3.  NEZHA_PORT (v0面板填5555, v1留空) [%s]: " "${NEZHA_PORT:-}"
+  read -r input </dev/tty
+  ENV_NEZHA_PORT="${input:-${NEZHA_PORT:-}}"
+
+  printf "4.  NEZHA_KEY (哪吒密钥) [%s]: " "${NEZHA_KEY:-}"
+  read -r input </dev/tty
+  ENV_NEZHA_KEY="${input:-${NEZHA_KEY:-}}"
+
+  printf "5.  NEZHA_DOH (安全DNS，如 1.1.1.1/dns-query) [%s]: " "${NEZHA_DOH:-}"
+  read -r input </dev/tty
+  ENV_NEZHA_DOH="${input:-${NEZHA_DOH:-}}"
+
+  printf "6.  CF_TUNNEL_TOKEN (隧道Token) [%s]: " "${CF_TUNNEL_TOKEN:-}"
+  read -r input </dev/tty
+  ENV_CF_TUNNEL_TOKEN="${input:-${CF_TUNNEL_TOKEN:-}}"
+
+  printf "7.  CF_DOMAIN (自定义域名) [%s]: " "${CF_DOMAIN:-}"
+  read -r input </dev/tty
+  ENV_CF_DOMAIN="${input:-${CF_DOMAIN:-}}"
+
+  printf "8.  SUB_PATH (订阅路径) [%s]: " "${SUB_PATH:-}"
+  read -r input </dev/tty
+  ENV_SUB_PATH="${input:-${SUB_PATH:-}}"
+
+  printf "9.  WSPATH (VLESS路径，留空取UUID前8位) [%s]: " "${WSPATH:-}"
+  read -r input </dev/tty
+  ENV_WSPATH="${input:-${WSPATH:-}}"
+
+  # 2. 修改了这里的提示语：明确告诉用户留空就是禁用
+  printf "10. TUIC_PORT (TUIC端口，输入具体数字开启，留空禁用) [%s]: " "${TUIC_PORT:-}"
+  read -r input </dev/tty
+  ENV_TUIC_PORT="${input:-${TUIC_PORT:-}}"
+
   printf "%b\n\n" "${YELLOW}======================================================${NC}"
 }
 
