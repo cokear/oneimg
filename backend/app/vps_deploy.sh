@@ -28,6 +28,17 @@ need_cmd() {
   command -v "$1" >/dev/null 2>&1
 }
 
+# 检测 init/服务管理系统: systemd | openrc | none
+detect_init() {
+  if need_cmd systemctl && [ -d /run/systemd/system ]; then
+    echo "systemd"
+  elif need_cmd rc-service && need_cmd rc-update; then
+    echo "openrc"
+  else
+    echo "none"
+  fi
+}
+
 fetch_file() {
   url="$1"
   out="$2"
@@ -86,7 +97,7 @@ ask_config() {
   fi
 
   printf "\n%b\n" "${YELLOW}=== 请配置 VPS 节点环境变量 (回车使用括号内的默认值) ===${NC}"
-  
+
   printf "1.  UUID (核心凭证) [%s]: " "${UUID:-}"
   read -r input </dev/tty
   ENV_UUID="${input:-${UUID:-}}"
@@ -123,10 +134,15 @@ ask_config() {
   read -r input </dev/tty
   ENV_WSPATH="${input:-${WSPATH:-}}"
 
-  # 2. 修改了这里的提示语：明确告诉用户留空就是禁用
+  # 明确告诉用户留空就是禁用
   printf "10. TUIC_PORT (TUIC端口，输入具体数字开启，留空禁用) [%s]: " "${TUIC_PORT:-}"
   read -r input </dev/tty
   ENV_TUIC_PORT="${input:-${TUIC_PORT:-}}"
+
+  # DEBUG 日志开关：默认开启，方便出问题时排查
+  printf "11. DEBUG (是否记录运行日志，出问题好排查) [%s]: " "${DEBUG:-true}"
+  read -r input </dev/tty
+  ENV_DEBUG="${input:-${DEBUG:-true}}"
 
   printf "%b\n\n" "${YELLOW}======================================================${NC}"
 }
@@ -160,33 +176,30 @@ CF_DOMAIN=${ENV_CF_DOMAIN:-}
 SUB_PATH=${ENV_SUB_PATH:-}
 WSPATH=${ENV_WSPATH:-}
 TUIC_PORT=${ENV_TUIC_PORT:-}
+DEBUG=${ENV_DEBUG:-true}
 EOF
 }
 
 create_wrapper() {
+  # 用 /bin/sh 以兼容无 bash 的精简系统(Alpine 等)；exec 让信号能正确传递给主进程
+  if [ -x /bin/bash ]; then
+    SHEBANG="#!/bin/bash"
+  else
+    SHEBANG="#!/bin/sh"
+  fi
   cat > "${WRAPPER}" <<EOF
-#!/bin/bash
+${SHEBANG}
 set -a
-source "${APP_ENV}"
+. "${APP_ENV}"
 set +a
 exec "${APP_BIN}" >> "${APP_LOG}" 2>&1
 EOF
   chmod +x "${WRAPPER}"
 }
 
+# ---------- systemd ----------
 setup_systemd() {
-  if [ "$(id -u)" != "0" ] || ! need_cmd systemctl; then
-    warn "当前不是 root 或者不支持 systemd，采用传统后台模式启动。"
-    set -a
-    # shellcheck disable=SC1090
-    . "${APP_ENV}"
-    set +a
-    nohup "${APP_BIN}" >> "${APP_LOG}" 2>&1 &
-    say "程序已启动 (nohup)。日志路径: ${APP_LOG}"
-    return
-  fi
-
-  say "正在注册 Systemd 系统级自启服务..."
+  say "检测到 systemd，注册系统级自启服务..."
   SERVICE_FILE="/etc/systemd/system/${APP_NAME}.service"
 
   cat > "${SERVICE_FILE}" <<EOF
@@ -201,6 +214,7 @@ User=root
 ExecStart=${WRAPPER}
 Restart=always
 RestartSec=10
+LimitNOFILE=65535
 
 [Install]
 WantedBy=multi-user.target
@@ -217,6 +231,89 @@ EOF
   info "  查看日志: tail -f ${APP_LOG}"
 }
 
+# ---------- OpenRC (Alpine 等) ----------
+setup_openrc() {
+  say "检测到 OpenRC，注册 supervise-daemon 看门狗服务..."
+  SERVICE_FILE="/etc/init.d/${APP_NAME}"
+
+  cat > "${SERVICE_FILE}" <<EOF
+#!/sbin/openrc-run
+
+name="${APP_NAME}"
+description="Nexus Service"
+
+command="${WRAPPER}"
+command_background=false
+directory="${BASE_DIR}"
+pidfile="/run/${APP_NAME}.pid"
+
+# supervise-daemon 提供崩溃自动重启(等价 systemd Restart=always)
+supervisor="supervise-daemon"
+respawn_delay=5
+respawn_max=0
+
+depend() {
+    need net
+    after firewall
+}
+
+start_pre() {
+    ulimit -n 65535 2>/dev/null || true
+}
+EOF
+  chmod +x "${SERVICE_FILE}"
+
+  rc-update add "${APP_NAME}" default >/dev/null 2>&1
+  rc-service "${APP_NAME}" restart 2>/dev/null || rc-service "${APP_NAME}" start
+
+  say "✅ OpenRC 服务已接管！开机自启、崩溃自动重启已生效。"
+  info "  重启程序: rc-service ${APP_NAME} restart"
+  info "  停止程序: rc-service ${APP_NAME} stop"
+  info "  查看状态: rc-service ${APP_NAME} status"
+  info "  查看日志: tail -f ${APP_LOG}"
+}
+
+# ---------- 无 init 兜底 ----------
+setup_nohup() {
+  warn "未检测到 systemd/OpenRC，采用 nohup 后台模式(无崩溃自愈，重启后不自启)。"
+  pkill -9 -f "${APP_BIN}" >/dev/null 2>&1 || true
+  nohup "${WRAPPER}" >/dev/null 2>&1 &
+  say "程序已启动 (nohup)。日志路径: ${APP_LOG}"
+  warn "建议手动加一条 crontab 守护: */2 * * * * pgrep -f ${APP_NAME}-server || ${WRAPPER}"
+}
+
+setup_service() {
+  INIT_SYS="$(detect_init)"
+  if [ "$(id -u)" != "0" ]; then
+    warn "当前非 root，无法注册系统服务，改用 nohup 启动。"
+    setup_nohup
+    return
+  fi
+  case "${INIT_SYS}" in
+    systemd) setup_systemd ;;
+    openrc)  setup_openrc ;;
+    *)       setup_nohup ;;
+  esac
+}
+
+# 停止服务(自适应)
+stop_service() {
+  case "$(detect_init)" in
+    systemd)
+      systemctl stop "${APP_NAME}" >/dev/null 2>&1 || true
+      systemctl disable "${APP_NAME}" >/dev/null 2>&1 || true
+      rm -f "/etc/systemd/system/${APP_NAME}.service"
+      systemctl daemon-reload
+      ;;
+    openrc)
+      rc-service "${APP_NAME}" stop >/dev/null 2>&1 || true
+      rc-update del "${APP_NAME}" default >/dev/null 2>&1 || true
+      rm -f "/etc/init.d/${APP_NAME}"
+      ;;
+  esac
+  pkill -9 -f "${APP_BIN}" >/dev/null 2>&1 || true
+}
+
 uninstall_app() {
   printf "\n%b\n" "${RED}=== 准备卸载 VPS 节点 ===${NC}"
   if [ -z "${NON_INTERACTIVE:-}" ]; then
@@ -228,14 +325,12 @@ uninstall_app() {
     esac
   fi
 
-  if [ "$(id -u)" = "0" ] && need_cmd systemctl; then
-    systemctl stop "${APP_NAME}" >/dev/null 2>&1 || true
-    systemctl disable "${APP_NAME}" >/dev/null 2>&1 || true
-    rm -f "/etc/systemd/system/${APP_NAME}.service"
-    systemctl daemon-reload
+  if [ "$(id -u)" = "0" ]; then
+    stop_service
+  else
+    pkill -9 -f "${APP_BIN}" >/dev/null 2>&1 || true
   fi
 
-  pkill -9 -f "${APP_BIN}" >/dev/null 2>&1 || true
   rm -rf "${BASE_DIR}"
   say "✅ 实体版本已完全卸载并清理干净！"
   exit 0
@@ -249,13 +344,14 @@ run_install() {
   download_binary
   create_env_file
   create_wrapper
-  setup_systemd
+  setup_service
   say "🎉 部署大功告成！程序本体存放在 ${BASE_DIR} 目录。"
+  info "  当前 init 系统: $(detect_init)"
 }
 
 show_menu() {
-  printf "\n%b\n" "${GREEN} Nexus (VPS 实体常驻版) 一键管理脚本 ${NC}"
-  printf "  ${YELLOW}1.${NC} 安装 / Systemd 启动服务\n"
+  printf "\n%b\n" "${GREEN} Nexus (VPS 实体常驻版) 一键管理脚本 [系统自适应] ${NC}"
+  printf "  ${YELLOW}1.${NC} 安装 / 启动服务 (自动适配 systemd / OpenRC)\n"
   printf "  ${YELLOW}2.${NC} 完全卸载节点\n"
   printf "  ${YELLOW}0.${NC} 退出脚本\n"
   printf "请输入数字 [0-2]: "; read -r choice </dev/tty
